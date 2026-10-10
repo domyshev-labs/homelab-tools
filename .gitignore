@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+__pycache__/
+*.pyc
+observability/data/
+observability/secrets/
+._*
+
+# Local deployment configurations; publish examples only.
+proxmox/tank-window/tank-window.json
+observability/agents/proxmox.alloy
+*.local.*

@@ -1,0 +1,12 @@
+[Unit]
+Description=Scheduled availability of the tank backup disk
+After=pve-cluster.service zfs-import.target zfs-mount.service time-sync.target
+Wants=time-sync.target
+
+[Service]
+Type=oneshot
+SyslogIdentifier=tank-window
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/local/sbin/tank-window check
+TimeoutStartSec=infinity

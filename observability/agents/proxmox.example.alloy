@@ -1,0 +1,42 @@
+// Only the disk-window script, not the whole Proxmox journal.
+loki.relabel "tank_window" {
+  forward_to = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label = "unit"
+  }
+}
+
+loki.source.journal "tank_window" {
+  matches = "SYSLOG_IDENTIFIER=tank-window"
+  max_age = "24h"
+  labels = {
+    host = "proxmox",
+    service = "tank-window",
+  }
+  relabel_rules = loki.relabel.tank_window.rules
+  forward_to = [loki.process.tank_window.receiver]
+}
+
+loki.process "tank_window" {
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+  forward_to = [loki.write.central.receiver]
+}
+
+loki.write "central" {
+  endpoint {
+    url = "http://LOKI_HOST:3100/loki/api/v1/push"
+  }
+  wal {
+    enabled = true
+  }
+}

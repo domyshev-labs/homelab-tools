@@ -1,0 +1,22 @@
+[Unit]
+Description=Send only tank-window logs to the configured Loki server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=alloy
+Group=alloy
+SupplementaryGroups=adm systemd-journal
+Type=simple
+ExecStart=/usr/bin/alloy run --storage.path=/var/lib/alloy-tank-window --server.http.listen-addr=127.0.0.1:12346 /etc/alloy-tank-window/config.alloy
+Restart=on-failure
+RestartSec=5
+StateDirectory=alloy-tank-window
+StateDirectoryMode=0750
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

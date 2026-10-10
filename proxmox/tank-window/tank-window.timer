@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry pending tank disk operations every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+OnBootSec=2min
+AccuracySec=1s
+Unit=tank-window.service
+
+[Install]
+WantedBy=timers.target

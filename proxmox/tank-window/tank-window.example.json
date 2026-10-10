@@ -1,0 +1,15 @@
+{
+  "pool": "tank",
+  "disk": "/dev/disk/by-id/REPLACE_WITH_WHOLE_DISK_ID",
+  "backup_path": "/tank/backups/proxmox-vm-backups",
+  "storages": [
+    "tank-vmdata",
+    "proxmox-vm-backups"
+  ],
+  "start": "02:00",
+  "end": "05:00",
+  "samba_services": [
+    "smbd.service",
+    "nmbd.service"
+  ]
+}
