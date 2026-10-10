@@ -123,6 +123,42 @@ class Tests(unittest.TestCase):
         with self.assertRaises(RuntimeError): self.c.wake()
         self.assertTrue(all(self.c.flags.values()))
 
+    def test_wake_skips_truenas_system_datasets_and_enables_storages(self):
+        self.c.flags = {name: True for name in CONFIG['storages']}
+        datasets = '\n'.join([
+            'tank\ton\tyes\t/tank',
+            'tank/.system\ton\tno\tlegacy',
+            'tank/.system/samba4\ton\tno\tlegacy',
+            'tank/hidden\ton\tno\tnone',
+            'tank/ix-apps\tnoauto\tno\t/.ix-apps',
+            'tank/off\toff\tno\t/tank/off',
+            'tank/backups\ton\tno\t/tank/backup directory',
+            'tank/backups/proxmox-vm-backups\ton\tyes\t/tank/backups/proxmox-vm-backups',
+        ])
+        command = self.c.command
+        def with_datasets(*args, **kwargs):
+            if args[:2] == ('zfs', 'list'):
+                self.c.calls.append(args)
+                return subprocess.CompletedProcess(args, 0, datasets, '')
+            return command(*args, **kwargs)
+        with patch.object(m, 'run', side_effect=with_datasets):
+            self.c.wake()
+        mounts = [args for args in self.c.calls if args[:2] == ('zfs', 'mount')]
+        self.assertEqual(mounts, [('zfs', 'mount', 'tank/backups')])
+        self.assertFalse(any(self.c.flags.values()))
+        self.assertTrue((self.c.run_dir / 'awake').exists())
+
+    def test_real_dataset_mount_failure_keeps_storages_disabled(self):
+        def fail_mount(*args, **kwargs):
+            if args[:2] == ('zfs', 'list'):
+                return subprocess.CompletedProcess(args, 0, 'tank/backups\ton\tno\t/tank/backups', '')
+            if args[:2] == ('zfs', 'mount'):
+                raise RuntimeError('mount failed')
+            return self.c.command(*args, **kwargs)
+        with patch.object(m, 'run', side_effect=fail_mount), self.assertRaises(RuntimeError):
+            self.c.wake()
+        self.assertTrue(all(self.c.flags.values()))
+
     def test_task_query_failure_does_not_shutdown(self):
         def fail(): raise RuntimeError('pvenode unavailable')
         self.c.active_backups = fail

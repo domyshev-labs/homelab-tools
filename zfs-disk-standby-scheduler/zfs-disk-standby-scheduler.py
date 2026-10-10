@@ -191,11 +191,11 @@ class Controller:
             run('zpool', 'import', '-d', self.disk + '-part1', self.pool)
             self.validate_disk()
         try:
-            # Mount only this pool's regular automount datasets if already imported.
+            # Legacy/none mountpoints and noauto/off datasets are not automount targets.
             for line in run('zfs', 'list', '-H', '-r', '-t', 'filesystem',
-                            '-o', 'name,canmount,mounted', self.pool).stdout.splitlines():
-                name, canmount, mounted = line.split()
-                if canmount == 'on' and mounted == 'no':
+                            '-o', 'name,canmount,mounted,mountpoint', self.pool).stdout.splitlines():
+                name, canmount, mounted, mountpoint = line.split('\t', 3)
+                if canmount == 'on' and mounted == 'no' and mountpoint not in ('legacy', 'none'):
                     run('zfs', 'mount', name)
             self.validate_mount()
         except Exception:
