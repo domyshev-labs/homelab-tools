@@ -2,6 +2,7 @@
 
 This optional collector sends only the disk script logs to an existing Loki server.
 Grafana and Loki are deployed separately; this repository does not deploy them.
+Proxmox backup task logs can be added separately using the opt-in setup below.
 
 Before installation, set the Loki push URL and host label in your local `agents/zfs-disk-standby-scheduler.alloy`
 for your environment. Copy `agents/zfs-disk-standby-scheduler.example.alloy` to `agents/zfs-disk-standby-scheduler.alloy` and replace
@@ -110,3 +111,63 @@ systemctl list-timers 'zfs-disk-standby-scheduler*'
 ```
 
 Activating the timers during the day does not shut the disk down immediately.
+
+## Optional: collect Proxmox backup logs
+
+For an already installed collector, run from the repository root on Proxmox:
+
+```bash
+git pull --ff-only
+apt-get install -y acl
+bash observability/agents/enable-proxmox-backups.sh
+systemctl is-active alloy-zfs-disk-standby-scheduler.service
+journalctl -u alloy-zfs-disk-standby-scheduler.service -n 40 --no-pager
+```
+
+The helper preserves the installed Loki endpoint and disk script configuration.
+It validates the combined config with the installed Alloy before changing it,
+saves the previous config and task log ACLs under
+`/var/backups/alloy-zfs-disk-standby-scheduler`, then restarts only this collector.
+Running the helper again leaves an already configured backup source unchanged.
+The default Alloy service and disk scheduler timers are not changed.
+
+The source is `/var/log/pve/tasks/*/UPID:*:vzdump:*`, on the system disk.
+These are the task logs shown in the Proxmox Tasks interface: start, progress,
+warnings and final `TASK OK` or `TASK ERROR`. Other task types, the complete
+journal and guest logs are not forwarded. No backup is started by the helper.
+The backup disk is not read to collect logs.
+
+Proxmox task logs may be owned by `www-data` with mode `0640`. The helper adds
+read/traverse ACLs for `alloy` on task directories and existing vzdump files.
+Directory default ACLs also allow Alloy to read future task logs of other types;
+the configured file glob forwards only vzdump. Alloy continues to run as its
+unprivileged user. To restore the previous configuration and ACLs, use the
+backup directory printed by the helper:
+
+```bash
+cp -p /var/backups/alloy-zfs-disk-standby-scheduler/BEFORE_DIRECTORY/config.alloy /etc/alloy-zfs-disk-standby-scheduler/config.alloy
+setfacl --restore=/var/backups/alloy-zfs-disk-standby-scheduler/BEFORE_DIRECTORY/task-log-acls
+systemctl restart alloy-zfs-disk-standby-scheduler.service
+```
+
+ACL restoration covers paths present in the snapshot; files created afterwards
+retain inherited ACLs. Review those separately if removing all collector access.
+
+Files changed in the last 24 hours are discovered every 10 seconds and read
+from the beginning on first discovery. Existing recent logs may therefore
+appear immediately. Positions remain in the collector's existing state
+directory. Timestamps represent collection time, including for old logs read
+on first setup; the original text retains any timestamps printed by vzdump.
+
+In Grafana Explore use:
+
+```logql
+{host="proxmox",service="proxmox-backup"} | unpack
+```
+
+Each record carries the task filename in its JSON body, with the original line
+in `_entry`. `unpack` displays the original line and makes the filename available
+at query time without creating a separate indexed stream for every task.
+For failures use `{host="proxmox",service="proxmox-backup",level="error"} | unpack`.
+Start a backup only when its intended storage is mounted and active, then verify
+its progress and final result in Grafana. No synthetic task files are needed.

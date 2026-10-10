@@ -1,0 +1,40 @@
+// Append to the disk scheduler collector config; reuse loki.write.central.
+// Read task logs on the system disk, never the sleeping backup storage.
+loki.source.file "proxmox_backups" {
+  targets = [{
+    __path__ = "/var/log/pve/tasks/*/UPID:*:vzdump:*",
+    host = "proxmox",
+    service = "proxmox-backup",
+  }]
+  file_match {
+    enabled = true
+    sync_period = "10s"
+    ignore_older_than = "24h"
+  }
+  tail_from_end = false
+  forward_to = [loki.process.proxmox_backups.receiver]
+}
+
+loki.process "proxmox_backups" {
+  stage.static_labels {
+    values = { level = "info" }
+  }
+  stage.match {
+    selector = "{service=\"proxmox-backup\"} |~ \"^(WARN(ING)?:|TASK WARNINGS:)\""
+    stage.static_labels {
+      values = { level = "warn" }
+    }
+  }
+  stage.match {
+    selector = "{service=\"proxmox-backup\"} |~ \"^(ERROR:|TASK ERROR:)\""
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+  // Preserve the task filename in the JSON body, without an indexed stream
+  // for every backup. Original text is in _entry.
+  stage.pack {
+    labels = ["filename"]
+  }
+  forward_to = [loki.write.central.receiver]
+}
