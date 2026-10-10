@@ -2,6 +2,7 @@
 """Install/update with validated configuration, generated timers and rollback."""
 import argparse
 import ast
+from contextlib import ExitStack
 import fcntl
 import importlib.util
 import json
@@ -12,39 +13,39 @@ import subprocess
 import tempfile
 
 SOURCE = Path(__file__).resolve().parent
-SPEC = importlib.util.spec_from_file_location('tank_window', SOURCE / 'tank-window.py')
+SPEC = importlib.util.spec_from_file_location('zfs_disk_standby_scheduler', SOURCE / 'zfs-disk-standby-scheduler.py')
 SCRIPT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SCRIPT)
-UNITS = ('tank-window.service', 'tank-window-on.service', 'tank-window-off.service',
-         'tank-window.timer', 'tank-window-on.timer', 'tank-window-off.timer')
-TARGETS = ('usr/local/sbin/tank-window', 'etc/tank-window.json') + tuple(
+UNITS = ('zfs-disk-standby-scheduler.service', 'zfs-disk-standby-scheduler-on.service', 'zfs-disk-standby-scheduler-off.service',
+         'zfs-disk-standby-scheduler.timer', 'zfs-disk-standby-scheduler-on.timer', 'zfs-disk-standby-scheduler-off.timer')
+TARGETS = ('usr/local/sbin/zfs-disk-standby-scheduler', 'etc/zfs-disk-standby-scheduler.json') + tuple(
     'etc/systemd/system/' + unit for unit in UNITS)
 
 
 def timer_text(action, clock):
-    return (f'[Unit]\nDescription=Daily tank disk {action} request\n\n'
+    return (f'[Unit]\nDescription=Daily ZFS disk {action} request\n\n'
             f'[Timer]\nOnCalendar=*-*-* {clock}:00\nAccuracySec=1s\n'
-            f'Persistent=false\nUnit=tank-window-{action}.service\n\n'
+            f'Persistent=false\nUnit=zfs-disk-standby-scheduler-{action}.service\n\n'
             '[Install]\nWantedBy=timers.target\n')
 
 
 def deployment(config_path, root=Path('/')):
     """Default updates preserve the installed config; --config replaces it."""
-    installed = root / 'etc/tank-window.json'
+    installed = root / 'etc/zfs-disk-standby-scheduler.json'
     selected = Path(config_path) if config_path else (
-        installed if installed.exists() else SOURCE / 'tank-window.json')
+        installed if installed.exists() else SOURCE / 'zfs-disk-standby-scheduler.json')
     if not selected.is_file():
-        raise ValueError('Copy tank-window.example.json to tank-window.json and configure it first')
+        raise ValueError('Copy zfs-disk-standby-scheduler.example.json to zfs-disk-standby-scheduler.json and configure it first')
     config = SCRIPT.validate_config(json.loads(selected.read_text()))
-    script = (SOURCE / 'tank-window.py').read_bytes()
+    script = (SOURCE / 'zfs-disk-standby-scheduler.py').read_bytes()
     ast.parse(script)
-    files = {'usr/local/sbin/tank-window': (script, 0o755)}
+    files = {'usr/local/sbin/zfs-disk-standby-scheduler': (script, 0o755)}
     if config_path or not installed.exists():
-        files['etc/tank-window.json'] = ((json.dumps(config, indent=2) + '\n').encode(), 0o600)
+        files['etc/zfs-disk-standby-scheduler.json'] = ((json.dumps(config, indent=2) + '\n').encode(), 0o600)
     for unit in UNITS:
-        if unit == 'tank-window-on.timer':
+        if unit == 'zfs-disk-standby-scheduler-on.timer':
             data = timer_text('on', config['start']).encode()
-        elif unit == 'tank-window-off.timer':
+        elif unit == 'zfs-disk-standby-scheduler-off.timer':
             data = timer_text('off', config['end']).encode()
         else:
             data = (SOURCE / unit).read_bytes()
@@ -68,7 +69,7 @@ def atomic_write(path, data, mode):
 
 
 def backup(root):
-    parent = root / 'var/backups/tank-window'
+    parent = root / 'var/backups/zfs-disk-standby-scheduler'
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(parent, 0o700)
     directory = Path(tempfile.mkdtemp(prefix='before-', dir=parent))
@@ -132,8 +133,26 @@ def reload_units():
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
 
 
+def check_legacy():
+    # Prevent an installed older scheduler from running alongside the renamed one.
+    for unit in UNITS:
+        legacy = unit.replace('zfs-disk-standby-scheduler', 'tank-window')
+        result = subprocess.run(['systemctl', 'show', '-p', 'LoadState', '-p', 'ActiveState', legacy],
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        properties = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+        if properties.get('LoadState') == 'not-found':
+            continue
+        if result.returncode or properties.get('ActiveState') not in ('inactive', 'failed'):
+            raise RuntimeError('Stop the legacy scheduler and wait for its services: ' + legacy)
+        if legacy.endswith('.timer'):
+            result = subprocess.run(['systemctl', 'is-enabled', '--quiet', legacy])
+            if result.returncode == 0:
+                raise RuntimeError('Disable the legacy timer before installing: ' + legacy)
+
+
 def install(args):
     check_idle()
+    check_legacy()
     if args.rollback:
         directory = backup(Path('/'))
         try:
@@ -154,9 +173,9 @@ def install(args):
         directory = apply(files, reload_units=reload_units)
         print(f'Installed. Daily window: {config["start"]}-{config["end"]} (server timezone).')
         print('Backup: ' + str(directory))
-        print('Existing config preserved.' if 'etc/tank-window.json' not in files else 'Configuration installed.')
-    print('Timers remain stopped. Verify: tank-window status')
-    print('Activate: systemctl enable --now tank-window.timer tank-window-on.timer tank-window-off.timer')
+        print('Existing config preserved.' if 'etc/zfs-disk-standby-scheduler.json' not in files else 'Configuration installed.')
+    print('Timers remain stopped. Verify: zfs-disk-standby-scheduler status')
+    print('Activate: systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer')
 
 
 def main():
@@ -170,11 +189,13 @@ def main():
     for tool in ('zpool', 'zfs', 'pvesm', 'pvenode', 'hdparm', 'findmnt', 'lsblk', 'systemctl'):
         if not shutil.which(tool):
             raise RuntimeError('Missing command: ' + tool)
-    with open('/run/lock/tank-window.lock', 'a') as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise RuntimeError('A disk operation or coordinated task is running; try again after it finishes')
+    with ExitStack() as stack:
+        for name in ('tank-window', 'zfs-disk-standby-scheduler'):
+            lock = stack.enter_context(open('/run/lock/' + name + '.lock', 'a'))
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise RuntimeError('A disk operation or coordinated task is running; try again after it finishes')
         install(args)
 
 

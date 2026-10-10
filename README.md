@@ -3,10 +3,13 @@
 Scripts for home servers. Each tool has its own configuration and installation
 instructions. This project does not deploy the Grafana/Loki server stack.
 
-## Proxmox disk window
+## ZFS disk standby scheduler
 
-[tank-window](proxmox/tank-window/README.md) opens a ZFS backup disk during a
-scheduled window and safely exports the pool before putting the disk in standby.
+[zfs-disk-standby-scheduler](zfs-disk-standby-scheduler/README.md) imports a ZFS pool
+and puts its disk into standby after exporting the pool, according to a schedule.
+Useful for noisy home-server disks, occasional data access, maintenance and backups.
+The current implementation requires Linux with Proxmox VE; support for other
+ZFS hosts can be added later. The tool name does not depend on a pool name.
 
 - Stable whole-disk `/dev/disk/by-id` path; no fixed `/dev/sdX` names.
 - Separate opening, closing and retry timers; backup schedules stay independent.
@@ -15,7 +18,7 @@ scheduled window and safely exports the pool before putting the disk in standby.
 
 Only configuration examples are tracked. Copy the example files and fill in
 your disk ID, pool, storage names, paths and Loki endpoint. Local deployment
-configurations are ignored by Git. Existing `/etc/tank-window.json` is preserved
+configurations are ignored by Git. Existing `/etc/zfs-disk-standby-scheduler.json` is preserved
 on reinstall.
 
 The installer generates both daily timers from the config, validates the disk
@@ -26,11 +29,11 @@ See the tool README for the parameter table, update and rollback instructions.
 From the repository root on Proxmox, as root:
 
 ```bash
-cp proxmox/tank-window/tank-window.example.json proxmox/tank-window/tank-window.json
+cp zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.example.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
 # Edit the local configuration before installing.
-nano proxmox/tank-window/tank-window.json
-bash proxmox/tank-window/install.sh
-tank-window status
+nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+bash zfs-disk-standby-scheduler/install.sh
+zfs-disk-standby-scheduler status
 ```
 
 Read the tool instructions before enabling timers. For optional centralized
@@ -40,7 +43,7 @@ logs, install the Alloy package and follow `observability/README.md`.
 
 ```bash
 python3 -B -m unittest discover -s tests -v
-bash -n proxmox/tank-window/install.sh observability/agents/install-proxmox.sh
+bash -n zfs-disk-standby-scheduler/install.sh observability/agents/install.sh
 ```
 
 Repository: https://github.com/domyshev-labs/homelab-tools

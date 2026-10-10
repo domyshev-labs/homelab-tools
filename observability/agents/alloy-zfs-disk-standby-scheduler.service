@@ -1,5 +1,5 @@
 [Unit]
-Description=Send only tank-window logs to the configured Loki server
+Description=Send only zfs-disk-standby-scheduler logs to the configured Loki server
 After=network-online.target
 Wants=network-online.target
 
@@ -8,10 +8,10 @@ User=alloy
 Group=alloy
 SupplementaryGroups=adm systemd-journal
 Type=simple
-ExecStart=/usr/bin/alloy run --storage.path=/var/lib/alloy-tank-window --server.http.listen-addr=127.0.0.1:12346 /etc/alloy-tank-window/config.alloy
+ExecStart=/usr/bin/alloy run --storage.path=/var/lib/alloy-zfs-disk-standby-scheduler --server.http.listen-addr=127.0.0.1:12346 /etc/alloy-zfs-disk-standby-scheduler/config.alloy
 Restart=on-failure
 RestartSec=5
-StateDirectory=alloy-tank-window
+StateDirectory=alloy-zfs-disk-standby-scheduler
 StateDirectoryMode=0750
 NoNewPrivileges=true
 ProtectHome=true

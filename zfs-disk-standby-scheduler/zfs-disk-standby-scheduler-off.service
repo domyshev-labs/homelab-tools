@@ -1,11 +1,11 @@
 [Unit]
-Description=Open tank disk working window
+Description=Close ZFS disk working window safely
 After=pve-cluster.service zfs-import.target zfs-mount.service time-sync.target
 
 [Service]
 Type=oneshot
-SyslogIdentifier=tank-window
+SyslogIdentifier=zfs-disk-standby-scheduler
 StandardOutput=journal
 StandardError=journal
-ExecStart=/usr/local/sbin/tank-window on
+ExecStart=/usr/local/sbin/zfs-disk-standby-scheduler off
 TimeoutStartSec=infinity

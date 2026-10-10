@@ -1,36 +1,46 @@
-# Collect tank-window logs with Grafana Alloy
+# Collect zfs-disk-standby-scheduler logs with Grafana Alloy
 
 This optional collector sends only the disk script logs to an existing Loki server.
 Grafana and Loki are deployed separately; this repository does not deploy them.
 
-Before installation, set the Loki push URL and host label in your local `agents/proxmox.alloy`
-for your environment. Copy `agents/proxmox.example.alloy` to `agents/proxmox.alloy` and replace
+Before installation, set the Loki push URL and host label in your local `agents/zfs-disk-standby-scheduler.alloy`
+for your environment. Copy `agents/zfs-disk-standby-scheduler.example.alloy` to `agents/zfs-disk-standby-scheduler.alloy` and replace
 `LOKI_HOST:3100` with your Loki address. The local config is ignored by Git.
 
 ## Manual setup on Proxmox
 
+If the old `alloy-tank-window.service` is installed, disable it before installing
+the new collector, to release its diagnostics port:
+
+```bash
+systemctl disable --now alloy-tank-window.service
+```
+
+The old collector files are kept. New logs use
+`service="zfs-disk-standby-scheduler"`; existing Loki history keeps its previous
+service label. Update saved Grafana queries to the new label.
 
 Run the installation commands manually on the Proxmox host as root.
 
 ### 1. Copy this repository to Proxmox
 
-Clone the repository if it is accessible there, or copy the `proxmox/tank-window`
+Clone the repository if it is accessible there, or copy the `zfs-disk-standby-scheduler`
 and `observability/agents` directories. From the repository root, as root:
 
 ```bash
-cp proxmox/tank-window/tank-window.example.json proxmox/tank-window/tank-window.json
-nano proxmox/tank-window/tank-window.json
-bash proxmox/tank-window/install.sh
-tank-window status
+cp zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.example.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+bash zfs-disk-standby-scheduler/install.sh
+zfs-disk-standby-scheduler status
 ```
 
 If an earlier version is already installed, stop its three timers and wait for
 all three related services to finish before running the installer. Existing
-`/etc/tank-window.json` is retained. The installer does not activate the disk timers.
+`/etc/zfs-disk-standby-scheduler.json` is retained. The installer does not activate the disk timers.
 
 ```bash
-systemctl disable --now tank-window.timer tank-window-on.timer tank-window-off.timer
-systemctl is-active tank-window.service tank-window-on.service tank-window-off.service
+systemctl disable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
+systemctl is-active zfs-disk-standby-scheduler.service zfs-disk-standby-scheduler-on.service zfs-disk-standby-scheduler-off.service
 ```
 
 After installation, verify the server's local timezone with `timedatectl`.
@@ -57,22 +67,22 @@ apt-get install -y alloy
 
 Use an existing Grafana apt source if already configured rather than adding a
 duplicate. This setup leaves `/etc/alloy/config.alloy` intact and runs the
-script collector as its own `alloy-tank-window.service`.
+script collector as its own `alloy-zfs-disk-standby-scheduler.service`.
 
 ### 3. Start the collector
 
 ```bash
-cp observability/agents/proxmox.example.alloy observability/agents/proxmox.alloy
-nano observability/agents/proxmox.alloy
+cp observability/agents/zfs-disk-standby-scheduler.example.alloy observability/agents/zfs-disk-standby-scheduler.alloy
+nano observability/agents/zfs-disk-standby-scheduler.alloy
 # Replace LOKI_HOST:3100 with your server address:
 curl -fsS http://LOKI_HOST:3100/ready
-bash observability/agents/install-proxmox.sh
+bash observability/agents/install.sh
 ```
 
 The agent listens for its own local diagnostics on `127.0.0.1:12346`.
-It selects **only** `SYSLOG_IDENTIFIER=tank-window`. The three script units all
+It selects **only** `SYSLOG_IDENTIFIER=zfs-disk-standby-scheduler`. The three script units all
 set this identifier. It retains the unit label and extracts JSON `level`.
-Its WAL and source position are stored in `/var/lib/alloy-tank-window`, on the
+Its WAL and source position are stored in `/var/lib/alloy-zfs-disk-standby-scheduler`, on the
 Proxmox system disk, independently of the sleeping backup disk.
 Network outages trigger retries; the WAL adds durability but does not replace
 the local journal or guarantee unlimited buffering.
@@ -80,23 +90,23 @@ the local journal or guarantee unlimited buffering.
 ### 4. Test without changing disk state
 
 ```bash
-systemd-cat --identifier=tank-window /usr/local/sbin/tank-window status
-systemctl is-active alloy-tank-window.service
+systemd-cat --identifier=zfs-disk-standby-scheduler /usr/local/sbin/zfs-disk-standby-scheduler status
+systemctl is-active alloy-zfs-disk-standby-scheduler.service
 ```
 
 This runs only the script's status command and sends its output through the
-selected journal identifier. Check Grafana for `service="tank-window"`.
+selected journal identifier. Check Grafana for `service="zfs-disk-standby-scheduler"`.
 If needed, inspect the agent locally:
 
 ```bash
-journalctl -u alloy-tank-window.service -n 40 --no-pager
+journalctl -u alloy-zfs-disk-standby-scheduler.service -n 40 --no-pager
 ```
 
 After confirming logs and finishing backup configuration, activate the disk timers:
 
 ```bash
-systemctl enable --now tank-window.timer tank-window-on.timer tank-window-off.timer
-systemctl list-timers 'tank-window*'
+systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
+systemctl list-timers 'zfs-disk-standby-scheduler*'
 ```
 
 Activating the timers during the day does not shut the disk down immediately.

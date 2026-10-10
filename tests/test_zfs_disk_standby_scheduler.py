@@ -10,11 +10,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-script = Path(__file__).resolve().parents[1] / 'proxmox/tank-window/tank-window.py'
-spec = importlib.util.spec_from_file_location('tank_window', script)
+script = Path(__file__).resolve().parents[1] / 'zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.py'
+spec = importlib.util.spec_from_file_location('zfs_disk_standby_scheduler', script)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
-CONFIG = json.loads(script.with_name('tank-window.example.json').read_text())
+CONFIG = json.loads(script.with_name('zfs-disk-standby-scheduler.example.json').read_text())
 CONFIG['disk'] = '/dev/disk/by-id/wwn-0x0000000000000001'
 
 
@@ -178,12 +178,12 @@ class Tests(unittest.TestCase):
             @classmethod
             def now(cls, tz=None): return cls(2026, 10, 9, hour, 0)
         def open_local(file, *args, **kwargs):
-            if file == '/run/lock/tank-window.lock': file = directory / 'lock'
+            if file == '/run/lock/zfs-disk-standby-scheduler.lock': file = directory / 'lock'
             return original_open(file, *args, **kwargs)
         def read_local(path, *args, **kwargs):
-            if str(path) == '/etc/tank-window.json': return json.dumps(CONFIG)
+            if str(path) == '/etc/zfs-disk-standby-scheduler.json': return json.dumps(CONFIG)
             return original_read(path, *args, **kwargs)
-        with patch.object(m, 'Controller', return_value=self.c), patch.object(m.os, 'geteuid', return_value=0), patch.object(m.sys, 'argv', ['tank-window', mode]), patch.object(m.datetime, 'datetime', FixedDateTime), patch.object(Path, 'read_text', read_local), patch('builtins.open', open_local):
+        with patch.object(m, 'Controller', return_value=self.c), patch.object(m.os, 'geteuid', return_value=0), patch.object(m.sys, 'argv', ['zfs-disk-standby-scheduler', mode]), patch.object(m.datetime, 'datetime', FixedDateTime), patch.object(Path, 'read_text', read_local), patch('builtins.open', open_local):
             m.main()
 
     def test_enabling_check_in_daytime_does_nothing(self):

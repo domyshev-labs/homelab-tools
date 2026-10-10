@@ -33,7 +33,7 @@ def in_window(start, end, now):
 def log(message, level='info', event='operation'):
     print(json.dumps({
         'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'service': 'tank-window', 'level': level, 'event': event, 'message': message,
+        'service': 'zfs-disk-standby-scheduler', 'level': level, 'event': event, 'message': message,
     }, ensure_ascii=False), flush=True)
 
 
@@ -75,8 +75,8 @@ def validate_config(config):
 
 
 class Controller:
-    def __init__(self, config, state_dir=Path('/var/lib/tank-window'),
-                 run_dir=Path('/run/tank-window')):
+    def __init__(self, config, state_dir=Path('/var/lib/zfs-disk-standby-scheduler'),
+                 run_dir=Path('/run/zfs-disk-standby-scheduler')):
         self.c = validate_config(config)
         self.pool = config['pool']
         self.disk = config['disk']
@@ -267,8 +267,8 @@ def main():
         raise RuntimeError('Run as root')
     mode = sys.argv[1] if len(sys.argv) == 2 else 'check'
     if mode not in ('check', 'on', 'off', 'status'):
-        raise ValueError('Usage: tank-window [check|on|off|status] or validate-config PATH')
-    with open('/run/lock/tank-window.lock', 'a') as lock:
+        raise ValueError('Usage: zfs-disk-standby-scheduler [check|on|off|status] or validate-config PATH')
+    with open('/run/lock/zfs-disk-standby-scheduler.lock', 'a') as lock:
         try:
             # Scheduled events wait for a concurrent check/task rather than being lost.
             flags = fcntl.LOCK_EX if mode in ('on', 'off') else fcntl.LOCK_EX | fcntl.LOCK_NB
@@ -276,7 +276,7 @@ def main():
         except BlockingIOError:
             log('Another operation holds the lock; deferred')
             return
-        config = json.loads(Path('/etc/tank-window.json').read_text())
+        config = json.loads(Path('/etc/zfs-disk-standby-scheduler.json').read_text())
         control = Controller(config)
         now = datetime.datetime.now().astimezone()
         wanted = in_window(config['start'], config['end'], now)

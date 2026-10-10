@@ -1,12 +1,20 @@
-# Окно работы диска tank: ежедневно 02:00–05:00
+# ZFS disk standby scheduler
+
+Включение ZFS-пула и перевод его диска в standby по расписанию. Подходит для
+снижения шума домашнего сервера и для дисков, доступ к которым нужен периодически:
+бэкапы, работа с файлами и другие задачи. Имя пула задаётся в конфиге.
+
+Текущая реализация использует команды Proxmox VE и работает на Linux с Proxmox.
+Поддержка обычных ZFS-серверов пока не реализована. Standby останавливает вращение
+диска, но не отключает его питание. Расписание примера: 02:00–05:00.
 
 Диск: `/dev/disk/by-id/REPLACE_WITH_WHOLE_DISK_ID`.
 Пул и хранилища ниже приведены как примеры; укажи свои значения в конфиге.
 
 ## Конфигурация
 
-В репозитории хранится только `tank-window.example.json`. Скопируй его в
-`tank-window.json` и заполни настройки. Рабочий файл исключён из Git.
+В репозитории хранится только `zfs-disk-standby-scheduler.example.json`. Скопируй его в
+`zfs-disk-standby-scheduler.json` и заполни настройки. Рабочий файл исключён из Git.
 
 | Параметр | Значение |
 | --- | --- |
@@ -34,13 +42,13 @@ cat /etc/pve/storage.cfg
 не требует root и не обращается к диску:
 
 ```bash
-python3 proxmox/tank-window/tank-window.py validate-config proxmox/tank-window/tank-window.json
+python3 zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.py validate-config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
 ```
 
 Установщик дополнительно проверяет наличие диска, соответствие хранилищ пулу
 и каталогу, а для импортированного пула — принадлежность всех устройств выбранному
 диску. Проверки не импортируют пул, не экспортируют его и не запускают standby.
-После установки конфиг находится в `/etc/tank-window.json` с правами `0600`.
+После установки конфиг находится в `/etc/zfs-disk-standby-scheduler.json` с правами `0600`.
 
 ## Сейчас: включить хранилище для выбора в бэкапе
 
@@ -67,16 +75,16 @@ pvesm status
 
 ## Установка на Proxmox
 
-Основная версия скрипта находится в `proxmox/tank-window/` этого репозитория.
-Скопируй на Proxmox каталоги `proxmox/tank-window` и `observability/agents`,
+Основная версия скрипта находится в `zfs-disk-standby-scheduler/` этого репозитория.
+Скопируй на Proxmox каталоги `zfs-disk-standby-scheduler` и `observability/agents`,
 сохраняя структуру папок. Из корня скопированного комплекта, от root:
 
 ```bash
-cp proxmox/tank-window/tank-window.example.json proxmox/tank-window/tank-window.json
-nano proxmox/tank-window/tank-window.json
-bash proxmox/tank-window/install.sh
+cp zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.example.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+bash zfs-disk-standby-scheduler/install.sh
 timedatectl
-tank-window status
+zfs-disk-standby-scheduler status
 ```
 
 02:00 и 05:00 считаются по локальному часовому поясу **сервера** — так же,
@@ -87,8 +95,8 @@ Proxmox, hdparm, findmnt и Python 3.8 или новее; внешних биб�
 закончить настройку бэкапа на подключённом диске. Когда закончишь:
 
 ```bash
-systemctl enable --now tank-window.timer tank-window-on.timer tank-window-off.timer
-systemctl list-timers 'tank-window*'
+systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
+systemctl list-timers 'zfs-disk-standby-scheduler*'
 ```
 
 **Запуск таймеров днём ничего не выключает.** Включение запускается в 02:00,
@@ -122,11 +130,38 @@ systemctl list-timers 'tank-window*'
 
 ## Обновление, изменение конфига и откат
 
-Перед любой установкой останови три таймера и дождись завершения служб:
+### Переход со старого имени `tank-window`
+
+Если старая версия уже установлена, сначала отключи её таймеры:
 
 ```bash
 systemctl disable --now tank-window.timer tank-window-on.timer tank-window-off.timer
 systemctl is-active tank-window.service tank-window-on.service tank-window-off.service
+```
+
+Дождись `inactive`/`failed` у всех трёх служб. Затем из корня нового репозитория:
+
+```bash
+cp /etc/tank-window.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+bash zfs-disk-standby-scheduler/install.sh --config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+```
+
+Если конфиг был только в старой папке репозитория, скопируй вместо `/etc/tank-window.json`
+файл `proxmox/tank-window/tank-window.json`. Значение `pool` не переименовывается:
+если твой пул называется `tank`, оно остаётся `tank`.
+
+Старые файлы на сервере сохраняются, но старые таймеры должны оставаться отключёнными.
+Установщик проверяет это и удерживает также старую блокировку во время перехода.
+Другие ночные задачи переведи на `/run/lock/zfs-disk-standby-scheduler.lock`.
+Для новых установок используй только новые имена.
+
+### Обычное обновление
+
+Перед любой установкой останови три таймера и дождись завершения служб:
+
+```bash
+systemctl disable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
+systemctl is-active zfs-disk-standby-scheduler.service zfs-disk-standby-scheduler-on.service zfs-disk-standby-scheduler-off.service
 ```
 
 Все службы должны показывать `inactive` или `failed`. Установщик откажет при
@@ -136,28 +171,28 @@ systemctl is-active tank-window.service tank-window-on.service tank-window-off.s
 
 ```bash
 git pull --ff-only
-bash proxmox/tank-window/install.sh
+bash zfs-disk-standby-scheduler/install.sh
 ```
 
-Если `/etc/tank-window.json` уже существует, он является источником настроек
-при обычном обновлении. Локальный `tank-window.json` его не перезаписывает.
+Если `/etc/zfs-disk-standby-scheduler.json` уже существует, он является источником настроек
+при обычном обновлении. Локальный `zfs-disk-standby-scheduler.json` его не перезаписывает.
 
 Чтобы изменить часы или другие настройки, подготовь кандидат и явно применяй его:
 
 ```bash
-cp /etc/tank-window.json proxmox/tank-window/tank-window.json
-nano proxmox/tank-window/tank-window.json
-python3 proxmox/tank-window/tank-window.py validate-config proxmox/tank-window/tank-window.json
-bash proxmox/tank-window/install.sh --config proxmox/tank-window/tank-window.json
+cp /etc/zfs-disk-standby-scheduler.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+python3 zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.py validate-config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+bash zfs-disk-standby-scheduler/install.sh --config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
 ```
 
-Часы задаются **только в JSON**. Установщик создаёт `tank-window-on.timer` и
-`tank-window-off.timer` из `start`/`end`. Не редактируй эти таймеры вручную и
-не меняй расписание только в `/etc/tank-window.json` без повторного запуска
+Часы задаются **только в JSON**. Установщик создаёт `zfs-disk-standby-scheduler-on.timer` и
+`zfs-disk-standby-scheduler-off.timer` из `start`/`end`. Не редактируй эти таймеры вручную и
+не меняй расписание только в `/etc/zfs-disk-standby-scheduler.json` без повторного запуска
 установщика: systemd должен получить обновлённые таймеры.
 
 Перед заменой файлов установщик сохраняет прежний скрипт, конфиг и шесть unit-файлов
-в `/var/backups/tank-window/before-*`. Каталог доступен только root и содержит
+в `/var/backups/zfs-disk-standby-scheduler/before-*`. Каталог доступен только root и содержит
 реальный конфиг; не публикуй его. При ошибке записи или `daemon-reload` прежние
 файлы восстанавливаются. При отключении питания посередине установки используй
 созданную резервную копию для ручного запуска отката.
@@ -166,48 +201,48 @@ bash proxmox/tank-window/install.sh --config proxmox/tank-window/tank-window.jso
 установщиком; не используй wildcard:
 
 ```bash
-bash proxmox/tank-window/install.sh --rollback /var/backups/tank-window/before-EXAMPLE
+bash zfs-disk-standby-scheduler/install.sh --rollback /var/backups/zfs-disk-standby-scheduler/before-EXAMPLE
 ```
 
 Откат также сохраняет текущую версию перед восстановлением. Во всех случаях
 установщик оставляет таймеры остановленными. Проверь и включи их самостоятельно:
 
 ```bash
-tank-window status
-systemctl enable --now tank-window.timer tank-window-on.timer tank-window-off.timer
-systemctl list-timers 'tank-window*'
+zfs-disk-standby-scheduler status
+systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
+systemctl list-timers 'zfs-disk-standby-scheduler*'
 ```
 
 ## Проверка и ручное управление
 
 ```bash
-tank-window status
-journalctl -u tank-window.service -n 60 --no-pager
+zfs-disk-standby-scheduler status
+journalctl -u zfs-disk-standby-scheduler.service -n 60 --no-pager
 ```
 
 Чтобы работать с диском вручную днём:
 
 ```bash
-systemctl disable --now tank-window.timer tank-window-on.timer tank-window-off.timer
+systemctl disable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
 ```
 
 Это не прерывает уже запущенные операции. Дождись, чтобы:
 
 ```bash
-systemctl is-active tank-window.service tank-window-on.service tank-window-off.service
+systemctl is-active zfs-disk-standby-scheduler.service zfs-disk-standby-scheduler-on.service zfs-disk-standby-scheduler-off.service
 ```
 
 Все три службы должны показывать `inactive` или `failed`. Затем:
 
 ```bash
-tank-window on
+zfs-disk-standby-scheduler on
 ```
 
 После работы можно безопасно попросить выключение и вернуть расписание:
 
 ```bash
-tank-window off
-systemctl enable --now tank-window.timer tank-window-on.timer tank-window-off.timer
+zfs-disk-standby-scheduler off
+systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
 ```
 
 Ручные `on`/`off` не отменяют следующие события 02:00/05:00. Незавершённое
@@ -222,7 +257,7 @@ systemctl enable --now tank-window.timer tank-window-on.timer tank-window-off.ti
 используй общую блокировку и проверку монтирования, например для своего скрипта:
 
 ```bash
-flock -s /run/lock/tank-window.lock bash -c '
+flock -s /run/lock/zfs-disk-standby-scheduler.lock bash -c '
   source=$(findmnt -n -T /tank/backups/proxmox-vm-backups -o SOURCE) || exit 1
   fstype=$(findmnt -n -T /tank/backups/proxmox-vm-backups -o FSTYPE) || exit 1
   [[ "$fstype" == zfs && ( "$source" == tank || "$source" == tank/* ) ]] || exit 1
@@ -243,26 +278,26 @@ flock -s /run/lock/tank-window.lock bash -c '
 
 ## Логи в общей Grafana
 
-Версия из репозитория пишет JSON в journald с идентификатором `tank-window`.
+Версия из репозитория пишет JSON в journald с идентификатором `zfs-disk-standby-scheduler`.
 Alloy отдельно читает только этот идентификатор и отправляет записи на настроенный сервер Loki.
 Запись содержит `timestamp` (UTC), `service`, `level`, `event` и `message`.
 Все три systemd-службы направляют stdout/stderr в журнал с одинаковым
-`SyslogIdentifier=tank-window`. Alloy добавляет метки `host=proxmox`,
-`service=tank-window`, `unit` и извлекает `level`.
+`SyslogIdentifier=zfs-disk-standby-scheduler`. Alloy добавляет метки `host=proxmox`,
+`service=zfs-disk-standby-scheduler`, `unit` и извлекает `level`.
 
 Отправка логов не является частью операций ZFS: недоступность Loki не блокирует
-работу расписания. Инструкция настройки агента: [observability](../../observability/README.md).
+работу расписания. Инструкция настройки агента: [observability](../observability/README.md).
 
 Открой Grafana → Explore → источник Loki:
 
 ```logql
-{host="proxmox", service="tank-window"}
+{host="proxmox", service="zfs-disk-standby-scheduler"}
 ```
 
 Для просмотра только ошибок:
 
 ```logql
-{host="proxmox", service="tank-window", level="error"}
+{host="proxmox", service="zfs-disk-standby-scheduler", level="error"}
 ```
 
 Запуски через таймеры автоматически попадают в журнал. При ручном запуске
@@ -270,7 +305,7 @@ Alloy отдельно читает только этот идентификат
 например, безопасную проверку состояния:
 
 ```bash
-systemd-cat --identifier=tank-window /usr/local/sbin/tank-window status
+systemd-cat --identifier=zfs-disk-standby-scheduler /usr/local/sbin/zfs-disk-standby-scheduler status
 ```
 
 Аналогично можно запускать `on`/`off` через `systemd-cat`.

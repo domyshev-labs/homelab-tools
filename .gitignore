@@ -12,6 +12,10 @@ observability/secrets/
 ._*
 
 # Local deployment configurations; publish examples only.
+zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
+observability/agents/zfs-disk-standby-scheduler.alloy
+*.local.*
+
+# Legacy local configs also remain private.
 proxmox/tank-window/tank-window.json
 observability/agents/proxmox.alloy
-*.local.*

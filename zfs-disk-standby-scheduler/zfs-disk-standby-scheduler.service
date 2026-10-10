@@ -5,8 +5,8 @@ Wants=time-sync.target
 
 [Service]
 Type=oneshot
-SyslogIdentifier=tank-window
+SyslogIdentifier=zfs-disk-standby-scheduler
 StandardOutput=journal
 StandardError=journal
-ExecStart=/usr/local/sbin/tank-window check
+ExecStart=/usr/local/sbin/zfs-disk-standby-scheduler check
 TimeoutStartSec=infinity

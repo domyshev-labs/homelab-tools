@@ -1,5 +1,5 @@
 // Only the disk-window script, not the whole Proxmox journal.
-loki.relabel "tank_window" {
+loki.relabel "zfs_disk_standby_scheduler" {
   forward_to = []
   rule {
     source_labels = ["__journal__systemd_unit"]
@@ -7,18 +7,18 @@ loki.relabel "tank_window" {
   }
 }
 
-loki.source.journal "tank_window" {
-  matches = "SYSLOG_IDENTIFIER=tank-window"
+loki.source.journal "zfs_disk_standby_scheduler" {
+  matches = "SYSLOG_IDENTIFIER=zfs-disk-standby-scheduler"
   max_age = "24h"
   labels = {
     host = "proxmox",
-    service = "tank-window",
+    service = "zfs-disk-standby-scheduler",
   }
-  relabel_rules = loki.relabel.tank_window.rules
-  forward_to = [loki.process.tank_window.receiver]
+  relabel_rules = loki.relabel.zfs_disk_standby_scheduler.rules
+  forward_to = [loki.process.zfs_disk_standby_scheduler.receiver]
 }
 
-loki.process "tank_window" {
+loki.process "zfs_disk_standby_scheduler" {
   stage.json {
     expressions = {
       level = "level",

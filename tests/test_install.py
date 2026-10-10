@@ -6,11 +6,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / 'proxmox/tank-window'
+SOURCE = Path(__file__).resolve().parents[1] / 'zfs-disk-standby-scheduler'
 SPEC = importlib.util.spec_from_file_location('installer', SOURCE / 'install.py')
 m = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m)
-CONFIG = json.loads((SOURCE / 'tank-window.example.json').read_text())
+CONFIG = json.loads((SOURCE / 'zfs-disk-standby-scheduler.example.json').read_text())
 CONFIG['disk'] = '/dev/disk/by-id/wwn-0x0000000000000001'
 
 
@@ -23,7 +23,7 @@ class InstallationTests(unittest.TestCase):
         self.candidate.write_text(json.dumps(CONFIG))
 
     def installed_config(self, config):
-        path = self.root / 'etc/tank-window.json'
+        path = self.root / 'etc/zfs-disk-standby-scheduler.json'
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(config))
         path.chmod(0o600)
@@ -56,11 +56,11 @@ class InstallationTests(unittest.TestCase):
         original = path.read_bytes()
         selected, files = m.deployment(None, self.root)
         self.assertEqual(selected, config)
-        self.assertNotIn('etc/tank-window.json', files)
+        self.assertNotIn('etc/zfs-disk-standby-scheduler.json', files)
         m.apply(files, self.root)
         self.assertEqual(path.read_bytes(), original)
         for action, clock in [('on', '23:30'), ('off', '01:15')]:
-            text = (self.root / f'etc/systemd/system/tank-window-{action}.timer').read_text()
+            text = (self.root / f'etc/systemd/system/zfs-disk-standby-scheduler-{action}.timer').read_text()
             self.assertIn(f'OnCalendar=*-*-* {clock}:00', text)
             self.assertIn('Persistent=false', text)
 
@@ -74,7 +74,7 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
         m.restore(directory, self.root)
         self.assertEqual(path.read_bytes(), original)
-        self.assertFalse((self.root / 'usr/local/sbin/tank-window').exists())
+        self.assertFalse((self.root / 'usr/local/sbin/zfs-disk-standby-scheduler').exists())
 
     def test_failed_reload_restores_previous_files(self):
         path = self.installed_config(dict(CONFIG, start='01:00'))
@@ -88,7 +88,7 @@ class InstallationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             m.apply(files, self.root, reload)
         self.assertEqual(path.read_bytes(), original)
-        self.assertFalse((self.root / 'usr/local/sbin/tank-window').exists())
+        self.assertFalse((self.root / 'usr/local/sbin/zfs-disk-standby-scheduler').exists())
         self.assertEqual(len(calls), 2)
 
     def test_partial_write_failure_restores_previous_deployment(self):
@@ -97,16 +97,16 @@ class InstallationTests(unittest.TestCase):
         _, files = m.deployment(self.candidate, self.root)
         real_write = m.atomic_write
         def write(target, data, mode):
-            if target == self.root / 'etc/systemd/system/tank-window.service':
+            if target == self.root / 'etc/systemd/system/zfs-disk-standby-scheduler.service':
                 raise OSError('disk full')
             real_write(target, data, mode)
         with patch.object(m, 'atomic_write', side_effect=write), self.assertRaises(OSError):
             m.apply(files, self.root)
         self.assertEqual(path.read_bytes(), original)
-        self.assertFalse((self.root / 'usr/local/sbin/tank-window').exists())
+        self.assertFalse((self.root / 'usr/local/sbin/zfs-disk-standby-scheduler').exists())
 
     def test_validation_cli_has_no_disk_or_state_side_effects(self):
-        result = subprocess.run(['python3', '-B', str(SOURCE / 'tank-window.py'),
+        result = subprocess.run(['python3', '-B', str(SOURCE / 'zfs-disk-standby-scheduler.py'),
                                  'validate-config', str(self.candidate)],
                                 text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -133,11 +133,28 @@ class InstallationTests(unittest.TestCase):
             m.check_idle()
 
     def test_backup_refuses_symlink_targets(self):
-        path = self.root / 'etc/tank-window.json'
+        path = self.root / 'etc/zfs-disk-standby-scheduler.json'
         path.parent.mkdir()
         path.symlink_to(self.candidate)
         with self.assertRaises(ValueError):
             m.backup(self.root)
+
+    def test_legacy_active_scheduler_is_rejected(self):
+        result = subprocess.CompletedProcess([], 0, 'LoadState=loaded\nActiveState=active\n', '')
+        with patch.object(m.subprocess, 'run', return_value=result), self.assertRaises(RuntimeError):
+            m.check_legacy()
+
+    def test_legacy_enabled_timer_is_rejected(self):
+        def query(args, **kwargs):
+            output = 'LoadState=loaded\nActiveState=inactive\n' if 'show' in args else ''
+            return subprocess.CompletedProcess(args, 0, output, '')
+        with patch.object(m.subprocess, 'run', side_effect=query), self.assertRaises(RuntimeError):
+            m.check_legacy()
+
+    def test_legacy_missing_scheduler_does_not_block_installation(self):
+        result = subprocess.CompletedProcess([], 1, 'LoadState=not-found\nActiveState=inactive\n', '')
+        with patch.object(m.subprocess, 'run', return_value=result):
+            m.check_legacy()
 
 
 if __name__ == '__main__':
