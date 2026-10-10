@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -36,15 +37,49 @@ def log(message, level='info', event='operation'):
     }, ensure_ascii=False), flush=True)
 
 
+def validate_config(config):
+    """Validate without creating directories or accessing pool/disk state."""
+    fields = {'pool', 'disk', 'backup_path', 'storages', 'start', 'end', 'samba_services'}
+    if not isinstance(config, dict) or set(config) != fields:
+        raise ValueError('Config must contain exactly: ' + ', '.join(sorted(fields)))
+    for field in ('pool', 'disk', 'backup_path', 'start', 'end'):
+        if not isinstance(config[field], str) or not config[field]:
+            raise ValueError(f'{field} must be a non-empty string')
+    if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.:-]*', config['pool']):
+        raise ValueError('pool must be a pool name, without a dataset path')
+    disk = config['disk']
+    if (not re.fullmatch(r'/dev/disk/by-id/[A-Za-z0-9_.:+-]+', disk)
+            or Path(disk).name in ('.', '..')
+            or re.search(r'-part\d+$', disk) or 'REPLACE_' in disk):
+        raise ValueError('disk must be a configured whole-disk /dev/disk/by-id path')
+    path = Path(config['backup_path'])
+    if (not path.is_absolute() or path == Path('/') or '..' in path.parts
+            or any(ord(char) < 32 for char in config['backup_path'])):
+        raise ValueError('backup_path must be an absolute directory path without ..')
+    for field, pattern, allow_empty in (
+            ('storages', r'[A-Za-z][A-Za-z0-9_-]*', False),
+            ('samba_services', r'[A-Za-z0-9_][A-Za-z0-9_.@:-]*\.service', True)):
+        values = config[field]
+        if (not isinstance(values, list) or (not values and not allow_empty)
+                or any(not isinstance(value, str) or not re.fullmatch(pattern, value)
+                       for value in values)):
+            raise ValueError(f'{field} must be a list of valid, unique names')
+        if len(values) != len(set(values)):
+            raise ValueError(f'{field} must not contain duplicates')
+    for field in ('start', 'end'):
+        if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', config[field]):
+            raise ValueError(f'{field} must use HH:MM in 24-hour time')
+    if config['start'] == config['end']:
+        raise ValueError('start and end must differ')
+    return config
+
+
 class Controller:
     def __init__(self, config, state_dir=Path('/var/lib/tank-window'),
                  run_dir=Path('/run/tank-window')):
-        self.c = config
+        self.c = validate_config(config)
         self.pool = config['pool']
         self.disk = config['disk']
-        if not self.disk.startswith('/dev/disk/by-id/') or '-part' in self.disk:
-            raise ValueError('disk must be a whole-disk /dev/disk/by-id path')
-        in_window(config['start'], config['end'], datetime.datetime.now())
         self.state_dir = state_dir
         self.run_dir = run_dir
         state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -224,11 +259,15 @@ class Controller:
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == 'validate-config':
+        validate_config(json.loads(Path(sys.argv[2]).read_text()))
+        log('Configuration is valid', event='config_validated')
+        return
     if os.geteuid() != 0:
         raise RuntimeError('Run as root')
     mode = sys.argv[1] if len(sys.argv) == 2 else 'check'
     if mode not in ('check', 'on', 'off', 'status'):
-        raise ValueError('Usage: tank-window [check|on|off|status]')
+        raise ValueError('Usage: tank-window [check|on|off|status] or validate-config PATH')
     with open('/run/lock/tank-window.lock', 'a') as lock:
         try:
             # Scheduled events wait for a concurrent check/task rather than being lost.

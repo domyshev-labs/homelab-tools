@@ -10,9 +10,7 @@ for your environment. Copy `agents/proxmox.example.alloy` to `agents/proxmox.all
 ## Manual setup on Proxmox
 
 
-The assistant has not installed anything on Proxmox. All commands in this section
-are for the administrator to run there. Do not connect over SSH without renewed
-owner authorization.
+Run the installation commands manually on the Proxmox host as root.
 
 ### 1. Copy this repository to Proxmox
 

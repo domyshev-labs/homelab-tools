@@ -15,6 +15,7 @@ spec = importlib.util.spec_from_file_location('tank_window', script)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 CONFIG = json.loads(script.with_name('tank-window.example.json').read_text())
+CONFIG['disk'] = '/dev/disk/by-id/wwn-0x0000000000000001'
 
 
 class Fake(m.Controller):

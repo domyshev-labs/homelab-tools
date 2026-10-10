@@ -18,6 +18,11 @@ your disk ID, pool, storage names, paths and Loki endpoint. Local deployment
 configurations are ignored by Git. Existing `/etc/tank-window.json` is preserved
 on reinstall.
 
+The installer generates both daily timers from the config, validates the disk
+and storage settings, and saves the previous deployment for rollback. Use
+`--config PATH` to explicitly change configuration; normal updates preserve it.
+See the tool README for the parameter table, update and rollback instructions.
+
 From the repository root on Proxmox, as root:
 
 ```bash
