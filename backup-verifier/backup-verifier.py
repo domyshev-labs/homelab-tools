@@ -198,15 +198,17 @@ def subject(jobs,prefix):
 def report_html(jobs, title, generated_at):
     score=total_score(jobs);state=status(score);color=COLORS[state]
     esc=lambda value:html.escape(str(value),quote=True)
-    badge=lambda state:f'<strong style="color:{COLORS[state]};">{state}</strong>'
-    cell='padding:10px;border:1px solid #d1d5db;vertical-align:top;'
+    badge=lambda state:f'<span style="color:{COLORS[state]};font-weight:400;">{state}</span>'
+    parsed_at=dt.datetime.fromisoformat(generated_at)
+    if parsed_at.tzinfo is None: parsed_at=parsed_at.replace(tzinfo=dt.timezone.utc)
+    displayed_at=parsed_at.astimezone(dt.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+    cell='padding:10px;border:1px solid #d1d5db;vertical-align:top;font-size:14px;font-weight:400;'
     parts=[f'<!doctype html><html><body style="font-family:Arial,sans-serif;color:#111827;"><div style="max-width:760px;margin:auto;">'
         f'<div style="padding:20px;background:#f3f4f6;border-left:8px solid {color};">'
         f'<div style="font-size:32px;font-weight:bold;color:{color};">{state} {percent(score)}%</div>'
-        f'<div style="margin-top:8px;font-size:14px;color:#374151;">{esc(generated_at)}</div>'
+        f'<div style="margin-top:8px;font-size:14px;color:#374151;">{esc(displayed_at)}</div>'
         f'<div style="margin-top:8px;">Overall result: average of the two job percentages.</div></div>'
-        f'<p style="margin:16px 0;font-size:14px;color:#4b5563;">{esc(title)}</p>'
-        f'<table style="width:100%;border-collapse:collapse;"><thead><tr>'
+        f'<table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px;font-weight:400;"><thead><tr>'
         f'<th style="{cell}">Job</th><th style="{cell}">Job result</th><th style="{cell}">Item</th>'
         f'<th style="{cell}">Status</th><th style="{cell}">Details</th></tr></thead><tbody>']
     for job in jobs:
@@ -214,8 +216,8 @@ def report_html(jobs, title, generated_at):
         for index,row in enumerate(job['rows']):
             parts.append('<tr>')
             if index==0:
-                parts.append(f'<td rowspan="{count}" style="{cell}"><strong>{esc(job["name"])}</strong></td>'
-                    f'<td rowspan="{count}" style="{cell}">{badge(status(job["score"]))}<br><strong>{percent(job["score"])}%</strong><br>{job["successes"]}/{job["total"]}</td>')
+                parts.append(f'<td rowspan="{count}" style="{cell}">{esc(job["name"])}</td>'
+                    f'<td rowspan="{count}" style="{cell}">{badge(status(job["score"]))}<br>{percent(job["score"])}%<br>{job["successes"]}/{job["total"]}</td>')
             detail=row['reason']
             if row.get('archive'): detail+=' — '+Path(row['archive']).name+f' ({row["size"]:,} bytes)'
             if row.get('expected_after'): detail+='; expected after '+row['expected_after']
