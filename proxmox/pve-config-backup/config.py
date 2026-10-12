@@ -20,11 +20,18 @@ def validate(config):
     for key, lo, hi in [('retention_days', 1, 36500), ('compression_level', 1, 19), ('randomized_delay_seconds', 0, 86400)]:
         if type(config[key]) is not int or not lo <= config[key] <= hi:
             raise ValueError(f'{key} must be an integer between {lo} and {hi}')
-    if not isinstance(config['schedule'], str) or not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', config['schedule']):
-        raise ValueError('schedule must use HH:MM')
+    if not isinstance(config['schedule'], str) or not re.fullmatch(r'(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) )?(?:[01]\d|2[0-3]):[0-5]\d', config['schedule'], re.IGNORECASE):
+        raise ValueError('schedule must use HH:MM or a weekday and HH:MM, e.g. Mon 02:20')
     if type(config['persistent']) is not bool:
         raise ValueError('persistent must be a boolean')
     return config
+
+def calendar_expression(schedule):
+    parts = schedule.split()
+    if len(parts) == 1:
+        return '*-*-* ' + parts[0] + ':00'
+    return parts[0].title() + ' *-*-* ' + parts[1] + ':00'
+
 
 def render_units(config, checkout):
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+', checkout) or '..' in Path(checkout).parts:
@@ -35,7 +42,7 @@ def render_units(config, checkout):
             f'ExecStart=/bin/bash {checkout}/proxmox/pve-config-backup/pve-config-backup --config /etc/pve-config-backup.json\n'
             'StandardOutput=journal\nStandardError=journal\nSyslogIdentifier=pve-config-backup\n'),
         'pve-config-backup.timer': ('[Unit]\nDescription=Scheduled Proxmox host configuration backup\n\n'
-            f'[Timer]\nOnCalendar=*-*-* {config["schedule"]}:00\n'
+            f'[Timer]\nOnCalendar={calendar_expression(config["schedule"])}\n'
             f'RandomizedDelaySec={config["randomized_delay_seconds"]}s\n'
             f'Persistent={str(config["persistent"]).lower()}\n\n[Install]\nWantedBy=timers.target\n')}
 

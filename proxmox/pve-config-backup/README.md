@@ -15,7 +15,7 @@ path or schedule is embedded in the script. The default config location is
 | `backup_dataset` | Expected ZFS dataset, verified before writing |
 | `retention_days` | Remove this host's older archives after a successful backup |
 | `compression_level` | zstd level, integer 1–19 |
-| `schedule` | Daily HH:MM in the server timezone |
+| `schedule` | Daily HH:MM or weekday + HH:MM, e.g. Mon 02:20, in the server timezone |
 | `randomized_delay_seconds` | Additional random timer delay |
 | `persistent` | Catch up missed timer events; use false with a sleeping pool |
 

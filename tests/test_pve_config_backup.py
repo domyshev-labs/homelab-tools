@@ -102,5 +102,31 @@ elif name == 'zstd':
         self.assertEqual(list(self.dest.glob('*.part')), [])
 
 
+class BackupScheduleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('backup_config', ROOT / 'proxmox/pve-config-backup/config.py')
+        cls.config_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.config_module)
+        cls.example = json.loads((ROOT / 'proxmox/pve-config-backup/pve-config-backup.example.json').read_text())
+
+    def test_daily_schedule_retains_daily_calendar(self):
+        config = self.config_module.validate(dict(self.example, schedule='04:15'))
+        unit = self.config_module.render_units(config, '/root/tools')['pve-config-backup.timer']
+        self.assertIn('OnCalendar=*-*-* 04:15:00', unit)
+
+    def test_weekday_schedule_generates_weekly_calendar(self):
+        for day in ['Mon', 'mon', 'Sun']:
+            config = self.config_module.validate(dict(self.example, schedule=day + ' 02:20'))
+            unit = self.config_module.render_units(config, '/root/tools')['pve-config-backup.timer']
+            self.assertIn('OnCalendar=' + day.title() + ' *-*-* 02:20:00', unit)
+
+    def test_invalid_or_multiline_schedules_rejected(self):
+        for schedule in ['Monday 02:20', 'Mon 25:20', 'Mon 02:20\nExecStart=bad', '02:20;bad', '']:
+            with self.subTest(schedule=schedule), self.assertRaises(ValueError):
+                self.config_module.validate(dict(self.example, schedule=schedule))
+
+
 if __name__ == '__main__':
     unittest.main()
