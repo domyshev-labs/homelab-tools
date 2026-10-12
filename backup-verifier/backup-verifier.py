@@ -201,10 +201,12 @@ def report_html(jobs, title, generated_at):
     badge=lambda state:f'<strong style="color:{COLORS[state]};">{state}</strong>'
     cell='padding:10px;border:1px solid #d1d5db;vertical-align:top;'
     parts=[f'<!doctype html><html><body style="font-family:Arial,sans-serif;color:#111827;"><div style="max-width:760px;margin:auto;">'
-        f'<h2>{esc(title)}</h2><div style="padding:20px;background:#f3f4f6;border-left:8px solid {color};">'
+        f'<div style="padding:20px;background:#f3f4f6;border-left:8px solid {color};">'
         f'<div style="font-size:32px;font-weight:bold;color:{color};">{state} {percent(score)}%</div>'
-        f'<div>Overall result: average of the two job percentages.</div></div>'
-        f'<p>{esc(generated_at)}</p><table style="width:100%;border-collapse:collapse;"><thead><tr>'
+        f'<div style="margin-top:8px;font-size:14px;color:#374151;">{esc(generated_at)}</div>'
+        f'<div style="margin-top:8px;">Overall result: average of the two job percentages.</div></div>'
+        f'<p style="margin:16px 0;font-size:14px;color:#4b5563;">{esc(title)}</p>'
+        f'<table style="width:100%;border-collapse:collapse;"><thead><tr>'
         f'<th style="{cell}">Job</th><th style="{cell}">Job result</th><th style="{cell}">Item</th>'
         f'<th style="{cell}">Status</th><th style="{cell}">Details</th></tr></thead><tbody>']
     for job in jobs:
