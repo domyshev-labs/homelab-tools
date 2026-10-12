@@ -23,6 +23,9 @@ class ConfigurationBackupTests(unittest.TestCase):
         source = source.replace('if [[ $EUID -ne 0 ]]; then', 'if false; then')
         self.script = self.base / 'backup-script'
         self.script.write_text(source)
+        (self.base / 'config.py').write_text((ROOT / 'proxmox/pve-config-backup/config.py').read_text())
+        self.config = self.base / 'config.json'
+        self.config.write_text(json.dumps(dict(backup_dir=str(self.dest), backup_dataset='tank/backups/proxmox-host-backup', retention_days=180, compression_level=6, schedule='03:30', randomized_delay_seconds=600, persistent=False)))
         shim = '''#!/usr/bin/env python3
 import os, pathlib, sys
 name=pathlib.Path(sys.argv[0]).name
@@ -47,7 +50,7 @@ elif name == 'zstd':
                         BACKUP_DIR=str(self.dest), CALLS=str(self.calls))
 
     def run_script(self, args=(), **env):
-        result = subprocess.run(['bash', str(self.script), *args],
+        result = subprocess.run(['bash', str(self.script), '--config', str(self.config), *args],
                                 env=dict(self.env, **env), text=True, capture_output=True)
         records = [json.loads(line) for line in result.stdout.splitlines()]
         return result, records

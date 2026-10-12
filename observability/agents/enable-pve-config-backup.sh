@@ -1,6 +1,9 @@
 #!/bin/bash
 # Add only the configuration backup journal to the existing collector.
 set -Eeuo pipefail
+[[ $# -eq 1 ]] || { echo 'Usage: enable-pve-config-backup.sh /absolute/fragment.alloy'; exit 2; }
+fragment=$(realpath -- "$1")
+[[ -f $fragment ]] || { echo 'Fragment does not exist'; exit 1; }
 cd -- "$(dirname -- "$0")"
 [[ $EUID -eq 0 ]] || { echo 'Run as root on Proxmox'; exit 1; }
 [[ -x /usr/bin/alloy ]] || { echo 'Install Alloy first'; exit 1; }
@@ -20,7 +23,7 @@ candidate=$(mktemp)
 trap 'rm -f -- "$candidate"' EXIT
 cat "$config" > "$candidate"
 printf '\n' >> "$candidate"
-cat pve-config-backup.alloy >> "$candidate"
+cat "$fragment" >> "$candidate"
 /usr/bin/alloy validate "$candidate"
 install -d -m 0700 /var/backups/alloy-zfs-disk-standby-scheduler
 backup=$(mktemp -d /var/backups/alloy-zfs-disk-standby-scheduler/before-config-backup-XXXXXX)
@@ -41,4 +44,3 @@ systemctl restart "$service"
 systemctl is-active --quiet "$service"
 trap - ERR
 echo 'Collector started: existing sources + configuration backup journal.'
-echo 'Grafana query: {host="proxmox",service="pve-config-backup"}'

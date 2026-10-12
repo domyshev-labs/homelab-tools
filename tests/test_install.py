@@ -11,7 +11,7 @@ SPEC = importlib.util.spec_from_file_location('installer', SOURCE / 'install.py'
 m = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(m)
 CONFIG = json.loads((SOURCE / 'zfs-disk-standby-scheduler.example.json').read_text())
-CONFIG['disk'] = '/dev/disk/by-id/wwn-0x0000000000000001'
+CONFIG.update(disk='/dev/disk/by-id/wwn-0x0000000000000001', pool='tank', backup_path='/tank/backups/proxmox-vm-backups', storages=['tank-vmdata','proxmox-vm-backups'], start='02:00', end='05:00')
 
 
 class InstallationTests(unittest.TestCase):

@@ -1,58 +1,24 @@
 # Homelab tools
 
-Scripts for home servers. Each tool has its own configuration and installation
-instructions. This project does not deploy the Grafana/Loki server stack.
+Independent Linux/Proxmox tools. Each tool accepts externally supplied configuration.
+Keep actual hostnames, disk IDs, paths, schedules, log labels, Loki endpoints and
+secrets in your own deployment repository. Only generic examples belong here.
 
-## ZFS disk standby scheduler
+- [ZFS disk standby scheduler](zfs-disk-standby-scheduler/README.md): scheduled
+  import/export and standby with backup safety checks and rollback.
+- [Proxmox host configuration backup](proxmox/pve-config-backup/README.md): verified
+  ZFS destination, scheduler coordination, archive verification and JSON events.
+- [Log collection helpers](observability/README.md): install or extend an existing
+  Alloy collector using configuration provided by the operator.
 
-[zfs-disk-standby-scheduler](zfs-disk-standby-scheduler/README.md) imports a ZFS pool
-and puts its disk into standby after exporting the pool, according to a schedule.
-Useful for noisy home-server disks, occasional data access, maintenance and backups.
-The current implementation requires Linux with Proxmox VE; support for other
-ZFS hosts can be added later. The tool name does not depend on a pool name.
+Systemd journal identifiers and JSON event names are stable tool interfaces.
+Grafana labels and log routing are assigned by external collector configuration.
 
-- Stable whole-disk `/dev/disk/by-id` path; no fixed `/dev/sdX` names.
-- Separate opening, closing and retry timers; backup schedules stay independent.
-- Shutdown is deferred while backups, scrub/resilver or coordinated tasks run.
-- JSON logs in journald; optional [Alloy collector](observability/README.md).
-
-Only configuration examples are tracked. Copy the example files and fill in
-your disk ID, pool, storage names, paths and Loki endpoint. Local deployment
-configurations are ignored by Git. Existing `/etc/zfs-disk-standby-scheduler.json` is preserved
-on reinstall.
-
-The installer generates both daily timers from the config, validates the disk
-and storage settings, and saves the previous deployment for rollback. Use
-`--config PATH` to explicitly change configuration; normal updates preserve it.
-See the tool README for the parameter table, update and rollback instructions.
-
-From the repository root on Proxmox, as root:
-
-```bash
-cp zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.example.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-# Edit the local configuration before installing.
-nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-bash zfs-disk-standby-scheduler/install.sh
-zfs-disk-standby-scheduler status
-```
-
-Read the tool instructions before enabling timers. For optional centralized
-logs, install the Alloy package and follow `observability/README.md`.
-
-## Proxmox host configuration backup
-
-[proxmox/pve-config-backup](proxmox/pve-config-backup/README.md) archives the Proxmox
-host configuration, independently of VM/CT disk backups. Includes the original
-script, systemd service and daily timer, installation and verification instructions.
-The service executes from the checkout, so `git pull` updates its code. It verifies
-ZFS mounting, coordinates with the disk scheduler and offers JSON journal logs
-for the existing Alloy/Loki collector.
-
-## Local verification
+## Verification
 
 ```bash
 python3 -B -m unittest discover -s tests -v
-bash -n zfs-disk-standby-scheduler/install.sh observability/agents/install.sh proxmox/pve-config-backup/pve-config-backup
+bash -n proxmox/pve-config-backup/pve-config-backup proxmox/pve-config-backup/install.sh observability/agents/*.sh zfs-disk-standby-scheduler/install.sh
 ```
 
 Repository: https://github.com/domyshev-labs/homelab-tools

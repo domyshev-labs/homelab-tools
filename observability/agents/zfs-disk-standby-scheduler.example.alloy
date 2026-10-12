@@ -11,8 +11,8 @@ loki.source.journal "zfs_disk_standby_scheduler" {
   matches = "SYSLOG_IDENTIFIER=zfs-disk-standby-scheduler"
   max_age = "24h"
   labels = {
-    host = "proxmox",
-    service = "zfs-disk-standby-scheduler",
+    host = "REPLACE_HOST_LABEL",
+    service = "REPLACE_SERVICE_LABEL",
   }
   relabel_rules = loki.relabel.zfs_disk_standby_scheduler.rules
   forward_to = [loki.process.zfs_disk_standby_scheduler.receiver]

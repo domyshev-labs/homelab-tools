@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 umask 077
 
-BACKUP_DIR="${BACKUP_DIR:-/tank/backups/proxmox-host-backup}"
-BACKUP_DATASET="${BACKUP_DATASET:-tank/backups/proxmox-host-backup}"
+CONFIG_FILE=/etc/pve-config-backup.json
+CHECK_ONLY=false
 TEMP_ARCHIVE=""
 phase=initialization
 
@@ -27,10 +27,20 @@ failed() {
 }
 trap cleanup EXIT
 trap failed ERR
-if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --check ) ]]; then
-  log error invalid_arguments 'Usage: pve-config-backup [--check]'
-  exit 2
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config)
+      [[ $# -ge 2 ]] || { log error invalid_arguments '--config requires a path'; exit 2; }
+      CONFIG_FILE=$2; shift 2 ;;
+    --check) CHECK_ONLY=true; shift ;;
+    *) log error invalid_arguments 'Usage: pve-config-backup [--config FILE] [--check]'; exit 2 ;;
+  esac
+done
+phase=configuration
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# config.py emits only validated, shell-quoted assignments, never arbitrary code.
+settings=$(python3 "$SCRIPT_DIR/config.py" shell "$CONFIG_FILE")
+eval "$settings"
 if [[ $EUID -ne 0 ]]; then
   log error permission_denied 'Run as root on Proxmox'
   exit 1
@@ -65,7 +75,7 @@ if [[ "$fstype" != zfs || "$source" != "$BACKUP_DATASET" || "$mounted" != yes ||
   log error storage_unavailable "Expected ${BACKUP_DATASET} mounted at ${BACKUP_DIR}; found source=${source}, type=${fstype}, mountpoint=${mountpoint}, mounted=${mounted}"
   exit 1
 fi
-if [[ ${1:-} == --check ]]; then
+if [[ $CHECK_ONLY == true ]]; then
   log info storage_ready "Backup destination verified: ${BACKUP_DATASET} at ${BACKUP_DIR}; no archive created"
   exit 0
 fi
@@ -82,12 +92,12 @@ ITEMS=(etc var/lib/pve-cluster/config.db usr/local/sbin)
 SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}")
 ITEMS+=("${SCRIPT_PATH#/}")
 phase=archive_creation
-tar --acls --numeric-owner -I 'zstd -T0 -6' -cpf "$TEMP_ARCHIVE" -C / "${ITEMS[@]}"
+tar --acls --numeric-owner -I "zstd -T0 -${COMPRESSION_LEVEL}" -cpf "$TEMP_ARCHIVE" -C / "${ITEMS[@]}"
 phase=archive_verification
 zstd -t "$TEMP_ARCHIVE"
 mv -- "$TEMP_ARCHIVE" "$ARCHIVE"
 chmod 600 "$ARCHIVE"
 TEMP_ARCHIVE=""
 phase=retention
-find "$BACKUP_DIR" -maxdepth 1 -type f -name "${HOST_NAME}-config-*.tar.zst" -mtime +180 -delete
+find "$BACKUP_DIR" -maxdepth 1 -type f -name "${HOST_NAME}-config-*.tar.zst" -mtime "+${RETENTION_DAYS}" -delete
 log info backup_completed "Backup created and compression verified: ${ARCHIVE}"

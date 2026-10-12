@@ -1,313 +1,81 @@
 # ZFS disk standby scheduler
 
-Включение ZFS-пула и перевод его диска в standby по расписанию. Подходит для
-снижения шума домашнего сервера и для дисков, доступ к которым нужен периодически:
-бэкапы, работа с файлами и другие задачи. Имя пула задаётся в конфиге.
+Imports a configured ZFS pool and requests export/standby on a daily schedule.
+Currently Linux with Proxmox VE only. Standby stops disk rotation, not power.
+Uses Python 3 standard library plus ZFS, Proxmox commands, hdparm and findmnt.
 
-Текущая реализация использует команды Proxmox VE и работает на Linux с Proxmox.
-Поддержка обычных ZFS-серверов пока не реализована. Standby останавливает вращение
-диска, но не отключает его питание. Расписание примера: 02:00–05:00.
+## External configuration
 
-Диск: `/dev/disk/by-id/REPLACE_WITH_WHOLE_DISK_ID`.
-Пул и хранилища ниже приведены как примеры; укажи свои значения в конфиге.
+Use `zfs-disk-standby-scheduler.example.json` as a schema example. Keep the real
+configuration outside this project. All fields are required; unknown fields,
+duplicates and invalid types are rejected.
 
-## Конфигурация
-
-В репозитории хранится только `zfs-disk-standby-scheduler.example.json`. Скопируй его в
-`zfs-disk-standby-scheduler.json` и заполни настройки. Рабочий файл исключён из Git.
-
-| Параметр | Значение |
+| Field | Meaning |
 | --- | --- |
-| `pool` | Имя ZFS-пула, например `tank`. Не путь dataset. Пул должен находиться на одном выбранном физическом диске. |
-| `disk` | Постоянный путь **целого диска** `/dev/disk/by-id/...`, без `-part1`. Заглушку обязательно заменить. |
-| `backup_path` | Абсолютный путь существующего каталога бэкапов на этом пуле. Скрипт не создаёт каталог и проверяет его ZFS-монтирование перед включением хранилищ. |
-| `storages` | Непустой список уникальных ID хранилищ Proxmox. Допускаются `zfspool` на выбранном пуле и `dir` с точным путём `backup_path`. |
-| `start` | Ежедневное время включения в формате `HH:MM`, по часовому поясу сервера. |
-| `end` | Время запроса выключения в том же формате. Должно отличаться от `start`. Окно может пересекать полночь. |
-| `samba_services` | Список имён служб `.service`, останавливаемых перед экспортом. `[]` полностью отключает управление Samba. Остановка служб влияет на все их SMB-ресурсы. |
+| `pool` | ZFS pool name, backed by one selected physical disk |
+| `disk` | Stable whole-disk `/dev/disk/by-id/...`, never a partition or /dev/sdX |
+| `backup_path` | Existing ZFS directory on this pool, verified when waking |
+| `storages` | Proxmox storage IDs tied to the pool or exact directory |
+| `start`, `end` | Different daily HH:MM values, server timezone; overnight supported |
+| `samba_services` | Optional service list, e.g. smbd.service; [] disables management |
 
-Все поля обязательны. Неизвестные поля, дубликаты и некорректные типы отвергаются.
-Пароли и токены этому скрипту не нужны; не добавляй их в конфиг.
-
-Посмотреть модели и серийные номера дисков и выбрать постоянную ссылку:
+Read-only validation, without root or disk operations:
 
 ```bash
-lsblk -d -o NAME,SIZE,MODEL,SERIAL
-ls -l /dev/disk/by-id/
-zpool status -P
-cat /etc/pve/storage.cfg
+python3 zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.py validate-config /path/to/config.json
 ```
 
-Убедись, что ссылка относится к нужному диску. Проверка синтаксиса и параметров
-не требует root и не обращается к диску:
+## Install/update on Proxmox
 
-```bash
-python3 zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.py validate-config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-```
-
-Установщик дополнительно проверяет наличие диска, соответствие хранилищ пулу
-и каталогу, а для импортированного пула — принадлежность всех устройств выбранному
-диску. Проверки не импортируют пул, не экспортируют его и не запускают standby.
-После установки конфиг находится в `/etc/zfs-disk-standby-scheduler.json` с правами `0600`.
-
-## Сейчас: включить хранилище для выбора в бэкапе
-
-Когда пул уже импортирован, проверь, что каталог находится на ZFS-пуле tank:
-
-```bash
-findmnt -T /tank/backups/proxmox-vm-backups -o SOURCE,FSTYPE,TARGET
-```
-
-SOURCE должен быть `tank` или `tank/...`, FSTYPE — `zfs`.
-Если это так, включи хранилище:
-
-```bash
-pvesm set proxmox-vm-backups --disable 0
-pvesm set tank-vmdata --disable 0
-pvesm status
-```
-
-Переоткрой окно редактирования задания бэкапа. Импорт пула не отменяет флаг
-`disable` в Proxmox. Если хранилище недоступно, проверь `pvesm status` и вывод `findmnt`. Не создавай каталог бэкапов на системном диске.
-
-`sun 03:00` означает бэкап только по воскресеньям.
-Для ежедневного бэкапа укажи `03:00` в Schedule. Этот пакет не меняет задания бэкапов.
-
-## Установка на Proxmox
-
-Основная версия скрипта находится в `zfs-disk-standby-scheduler/` этого репозитория.
-Скопируй на Proxmox каталоги `zfs-disk-standby-scheduler` и `observability/agents`,
-сохраняя структуру папок. Из корня скопированного комплекта, от root:
-
-```bash
-cp zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.example.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-bash zfs-disk-standby-scheduler/install.sh
-timedatectl
-zfs-disk-standby-scheduler status
-```
-
-02:00 и 05:00 считаются по локальному часовому поясу **сервера** — так же,
-как расписание бэкапа Proxmox. На сервере нужны имеющиеся инструменты ZFS,
-Proxmox, hdparm, findmnt и Python 3.8 или новее; внешних библиотек нет.
-
-Установщик регистрирует таймер, но пока не запускает его, чтобы можно было
-закончить настройку бэкапа на подключённом диске. Когда закончишь:
-
-```bash
-systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
-systemctl list-timers 'zfs-disk-standby-scheduler*'
-```
-
-**Запуск таймеров днём ничего не выключает.** Включение запускается в 02:00,
-попытка выключения — в 05:00. Минутный таймер только повторяет уже запрошенную
-операцию, если она не завершилась. Он не требует держать диск выключенным весь день.
-
-## Поведение
-
-- Ежедневно с 02:00 импортирует tank через постоянный путь раздела `...-part1`,
-  монтирует обычные automount datasets только этого пула, проверяет расположение
-  каталога бэкапов и включает оба хранилища. При первом включении запускает smbd/nmbd,
-  если они установлены; далее восстанавливает только службы, работавшие перед остановкой.
-- С 05:00 проверяет активные vzdump-задачи на узле и scrub/resilver в tank.
-  При их наличии откладывает выключение. Проверку бэкапов делает повторно после
-  отключения хранилищ. Ошибка проверки не считается отсутствием задач.
-- Останавливает Samba, отключает оба хранилища, экспортирует только tank без `-f`.
-  После успешного экспорта выполняет hdparm -y по постоянному ID **целого диска**.
-- При неудачном экспорте восстанавливает прежние флаги хранилищ и Samba, если пул
-  остался импортированным. Повторяет попытку через минуту. ВМ/контейнеры не останавливает.
-- Проверяет, что все пути устройств импортированного пула относятся к выбранному
-  диску; при обнаружении другого диска прекращает операцию.
-- После успешного standby прекращает повторные попытки. После перезагрузки
-  ожидает следующих 02:00/05:00; пропущенные события не выполняет задним числом.
-  Незавершённая попытка из предыдущей загрузки не сохраняется. Настройки
-  автоматического импорта ZFS не меняет.
-- Все SMB-ресурсы smbd/nmbd недоступны во время остановки этих служб.
-- Не выполняет zpool clear, принудительный экспорт или операции над другими пулами.
-
-Диск может самостоятельно проснуться от стороннего мониторинга или других обращений.
-Этот скрипт не отключает такие службы и не гарантирует тишину при стороннем доступе.
-
-## Обновление, изменение конфига и откат
-
-### Переход со старого имени `tank-window`
-
-Если старая версия уже установлена, сначала отключи её таймеры:
-
-```bash
-systemctl disable --now tank-window.timer tank-window-on.timer tank-window-off.timer
-systemctl is-active tank-window.service tank-window-on.service tank-window-off.service
-```
-
-Дождись `inactive`/`failed` у всех трёх служб. Затем из корня нового репозитория:
-
-```bash
-cp /etc/tank-window.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-bash zfs-disk-standby-scheduler/install.sh --config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-```
-
-Если конфиг был только в старой папке репозитория, скопируй вместо `/etc/tank-window.json`
-файл `proxmox/tank-window/tank-window.json`. Значение `pool` не переименовывается:
-если твой пул называется `tank`, оно остаётся `tank`.
-
-Старые файлы на сервере сохраняются, но старые таймеры должны оставаться отключёнными.
-Установщик проверяет это и удерживает также старую блокировку во время перехода.
-Другие ночные задачи переведи на `/run/lock/zfs-disk-standby-scheduler.lock`.
-Для новых установок используй только новые имена.
-
-### Обычное обновление
-
-Перед любой установкой останови три таймера и дождись завершения служб:
+Before installing, disable the three scheduler timers and wait for the associated
+services to finish. Disable old `tank-window*` timers too when migrating.
+The installer checks idle state, shared locks, legacy timers, storage and disk
+settings. It refuses unsafe or incomplete deployments.
 
 ```bash
 systemctl disable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
-systemctl is-active zfs-disk-standby-scheduler.service zfs-disk-standby-scheduler-on.service zfs-disk-standby-scheduler-off.service
+bash zfs-disk-standby-scheduler/install.sh --config /absolute/path/config.json
 ```
 
-Все службы должны показывать `inactive` или `failed`. Установщик откажет при
-работающей службе, активном таймере или занятой общей блокировке.
-
-Обновить код из корня репозитория, сохранив действующий конфиг:
-
-```bash
-git pull --ff-only
-bash zfs-disk-standby-scheduler/install.sh
-```
-
-Если `/etc/zfs-disk-standby-scheduler.json` уже существует, он является источником настроек
-при обычном обновлении. Локальный `zfs-disk-standby-scheduler.json` его не перезаписывает.
-
-Чтобы изменить часы или другие настройки, подготовь кандидат и явно применяй его:
-
-```bash
-cp /etc/zfs-disk-standby-scheduler.json zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-nano zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-python3 zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.py validate-config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-bash zfs-disk-standby-scheduler/install.sh --config zfs-disk-standby-scheduler/zfs-disk-standby-scheduler.json
-```
-
-Часы задаются **только в JSON**. Установщик создаёт `zfs-disk-standby-scheduler-on.timer` и
-`zfs-disk-standby-scheduler-off.timer` из `start`/`end`. Не редактируй эти таймеры вручную и
-не меняй расписание только в `/etc/zfs-disk-standby-scheduler.json` без повторного запуска
-установщика: systemd должен получить обновлённые таймеры.
-
-Перед заменой файлов установщик сохраняет прежний скрипт, конфиг и шесть unit-файлов
-в `/var/backups/zfs-disk-standby-scheduler/before-*`. Каталог доступен только root и содержит
-реальный конфиг; не публикуй его. При ошибке записи или `daemon-reload` прежние
-файлы восстанавливаются. При отключении питания посередине установки используй
-созданную резервную копию для ручного запуска отката.
-
-Для отката с остановленными таймерами укажи **конкретный** каталог, напечатанный
-установщиком; не используй wildcard:
-
-```bash
-bash zfs-disk-standby-scheduler/install.sh --rollback /var/backups/zfs-disk-standby-scheduler/before-EXAMPLE
-```
-
-Откат также сохраняет текущую версию перед восстановлением. Во всех случаях
-установщик оставляет таймеры остановленными. Проверь и включи их самостоятельно:
+The script is installed in `/usr/local/sbin`, config in `/etc`, and daily timers
+are generated from JSON. Normal reinstall without --config preserves installed
+config. All previous files are saved under `/var/backups/zfs-disk-standby-scheduler`;
+failed writes/reloads restore them. Timers remain stopped until you verify:
 
 ```bash
 zfs-disk-standby-scheduler status
 systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
-systemctl list-timers 'zfs-disk-standby-scheduler*'
 ```
 
-## Проверка и ручное управление
+Daily on/off timers request operations; a minute timer retries pending requests.
+Missed events are not replayed after reboot. Activating timers does not immediately
+export a pool. Active vzdump, scrub/resilver, mismatched devices and failed checks
+defer or reject shutdown. Export never uses -f. On export failure previous storage
+and Samba state is restored if the pool is still imported. The scheduler never
+stops guests and leaves pools busy with guest disks online.
+
+Operations cooperate via exclusive `/run/lock/zfs-disk-standby-scheduler.lock`.
+Other tasks should hold a shared lock for their entire run and verify mounting.
+The config backup tool implements this. Manual operations that bypass locking,
+monitoring or other disk access can wake the disk; silence is not guaranteed.
+
+Status and journal logs:
 
 ```bash
 zfs-disk-standby-scheduler status
 journalctl -u zfs-disk-standby-scheduler.service -n 60 --no-pager
 ```
 
-Чтобы работать с диском вручную днём:
+JSON event identifiers and journal `zfs-disk-standby-scheduler` are stable tool
+interfaces. Grafana labels, routing and queries are external deployment settings.
+
+Rollback with timers stopped and services idle:
 
 ```bash
-systemctl disable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
+bash zfs-disk-standby-scheduler/install.sh --rollback /var/backups/zfs-disk-standby-scheduler/EXACT_SNAPSHOT
 ```
 
-Это не прерывает уже запущенные операции. Дождись, чтобы:
-
-```bash
-systemctl is-active zfs-disk-standby-scheduler.service zfs-disk-standby-scheduler-on.service zfs-disk-standby-scheduler-off.service
-```
-
-Все три службы должны показывать `inactive` или `failed`. Затем:
-
-```bash
-zfs-disk-standby-scheduler on
-```
-
-После работы можно безопасно попросить выключение и вернуть расписание:
-
-```bash
-zfs-disk-standby-scheduler off
-systemctl enable --now zfs-disk-standby-scheduler.timer zfs-disk-standby-scheduler-on.timer zfs-disk-standby-scheduler-off.timer
-```
-
-Ручные `on`/`off` не отменяют следующие события 02:00/05:00. Незавершённое
-выключение повторяется минутным таймером вне рабочего окна, незавершённое
-включение — внутри окна. В начале следующего рабочего окна прежнее выключение
-отменяется. Если ВМ/контейнеры удерживают пул постоянно, диск останется работать.
-
-## Другие длительные задачи
-
-Занятый открытыми файлами пул обычно откажет в экспорте. Но между этапами задачи
-файлы могут быть закрыты. Для защиты всей задачи, включая такие промежутки,
-используй общую блокировку и проверку монтирования, например для своего скрипта:
-
-```bash
-flock -s /run/lock/zfs-disk-standby-scheduler.lock bash -c '
-  source=$(findmnt -n -T /tank/backups/proxmox-vm-backups -o SOURCE) || exit 1
-  fstype=$(findmnt -n -T /tank/backups/proxmox-vm-backups -o FSTYPE) || exit 1
-  [[ "$fstype" == zfs && ( "$source" == tank || "$source" == tank/* ) ]] || exit 1
-  exec /root/my-night-task.sh
-'
-```
-
-Замени путь на свой скрипт. Планируй задачу внутри окна, например в 02:10.
-Пока задача держит блокировку, минутный контроллер пропускает проверку,
-а запланированная операция включения/выключения ждёт освобождения блокировки. Процессы, игнорирующие эту блокировку,
-могут продолжать обращаться к диску; их этапы между открытием файлов скрипт не отслеживает.
-
-## Проверено
-
-Пакет проверен локально на синтаксис и имитации сценариев безопасности и таймеров: активный
-бэкап, ошибка проверки задач, неудачный экспорт, ошибка hdparm и повторная попытка,
-проверка окна и монтирования. На реальном сервере команды ещё не выполнялись.
-
-## Логи в общей Grafana
-
-Версия из репозитория пишет JSON в journald с идентификатором `zfs-disk-standby-scheduler`.
-Alloy отдельно читает только этот идентификатор и отправляет записи на настроенный сервер Loki.
-Запись содержит `timestamp` (UTC), `service`, `level`, `event` и `message`.
-Все три systemd-службы направляют stdout/stderr в журнал с одинаковым
-`SyslogIdentifier=zfs-disk-standby-scheduler`. Alloy добавляет метки `host=proxmox`,
-`service=zfs-disk-standby-scheduler`, `unit` и извлекает `level`.
-
-Отправка логов не является частью операций ZFS: недоступность Loki не блокирует
-работу расписания. Инструкция настройки агента: [observability](../observability/README.md).
-
-Открой Grafana → Explore → источник Loki:
-
-```logql
-{host="proxmox", service="zfs-disk-standby-scheduler"}
-```
-
-Для просмотра только ошибок:
-
-```logql
-{host="proxmox", service="zfs-disk-standby-scheduler", level="error"}
-```
-
-Запуски через таймеры автоматически попадают в журнал. При ручном запуске
-вывод остаётся в терминале. Чтобы тоже отправить его в Grafana, используй,
-например, безопасную проверку состояния:
-
-```bash
-systemd-cat --identifier=zfs-disk-standby-scheduler /usr/local/sbin/zfs-disk-standby-scheduler status
-```
-
-Аналогично можно запускать `on`/`off` через `systemd-cat`.
-Для появления записей в Grafana нужно установить и запустить Alloy на Proxmox.
-Сбор остальных логов Proxmox не включён.
+Verify status and enable timers after rollback. For manual disk availability,
+stop timers, wait for services, then use `zfs-disk-standby-scheduler on` or `off`;
+these requests do not cancel future daily events. SMB services may be unavailable
+while stopped; if guests keep the pool busy it remains online.

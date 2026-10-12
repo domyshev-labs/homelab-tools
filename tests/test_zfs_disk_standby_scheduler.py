@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location('zfs_disk_standby_scheduler', scri
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 CONFIG = json.loads(script.with_name('zfs-disk-standby-scheduler.example.json').read_text())
-CONFIG['disk'] = '/dev/disk/by-id/wwn-0x0000000000000001'
+CONFIG.update(disk='/dev/disk/by-id/wwn-0x0000000000000001', pool='tank', backup_path='/tank/backups/proxmox-vm-backups', storages=['tank-vmdata','proxmox-vm-backups'], start='02:00', end='05:00')
 
 
 class Fake(m.Controller):

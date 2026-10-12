@@ -1,6 +1,9 @@
 #!/bin/bash
 # Opt-in extension for an already installed disk scheduler collector.
 set -euo pipefail
+[[ $# -eq 1 ]] || { echo 'Usage: enable-proxmox-backups.sh /absolute/fragment.alloy'; exit 2; }
+fragment=$(realpath -- "$1")
+[[ -f $fragment ]] || { echo 'Fragment does not exist'; exit 1; }
 cd -- "$(dirname -- "$0")"
 [[ $EUID -eq 0 ]] || { echo 'Run as root on Proxmox'; exit 1; }
 for command in /usr/bin/alloy setfacl getfacl python3; do
@@ -22,7 +25,7 @@ candidate=$(mktemp)
 trap 'rm -f -- "$candidate"' EXIT
 cat "$config" > "$candidate"
 printf '\n' >> "$candidate"
-cat proxmox-backups.alloy >> "$candidate"
+cat "$fragment" >> "$candidate"
 # Validate before touching the installed config, permissions or service.
 /usr/bin/alloy validate "$candidate"
 
@@ -68,4 +71,3 @@ systemctl restart "$service"
 systemctl is-active --quiet "$service"
 trap - ERR
 echo 'Collector started: disk scheduler journal + vzdump task logs.'
-echo 'Grafana query: {host="proxmox",service="proxmox-backup"}'

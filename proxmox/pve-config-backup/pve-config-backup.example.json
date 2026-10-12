@@ -1,0 +1,9 @@
+{
+  "backup_dir": "/mnt/backup/host-config",
+  "backup_dataset": "backup/host-config",
+  "retention_days": 90,
+  "compression_level": 3,
+  "schedule": "04:15",
+  "randomized_delay_seconds": 120,
+  "persistent": false
+}

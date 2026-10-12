@@ -1,5 +1,7 @@
 #!/bin/bash
 set -euo pipefail
+[[ $# -eq 1 ]] || { echo 'Usage: install.sh /absolute/config.alloy'; exit 2; }
+config=$(realpath -- "$1")
 cd -- "$(dirname -- "$0")"
 [[ $EUID -eq 0 ]] || { echo 'Run as root on Proxmox'; exit 1; }
 [[ -x /usr/bin/alloy ]] || { echo 'Install the Grafana Alloy Debian package first'; exit 1; }
@@ -19,16 +21,16 @@ for unit in zfs-disk-standby-scheduler.service zfs-disk-standby-scheduler-on.ser
         exit 1
     fi
 done
-[[ -f zfs-disk-standby-scheduler.alloy ]] || {
-    echo 'Copy zfs-disk-standby-scheduler.example.alloy to zfs-disk-standby-scheduler.alloy and configure your Loki endpoint first'
+[[ -f $config ]] || {
+    echo 'Provide a complete collector configuration'
     exit 1
 }
-if grep -q 'LOKI_HOST' zfs-disk-standby-scheduler.alloy; then
-    echo 'Replace LOKI_HOST before installation'; exit 1
+if grep -Eq 'LOKI_HOST|REPLACE_' "$config"; then
+    echo 'Replace all placeholders before installation'; exit 1
 fi
-/usr/bin/alloy validate zfs-disk-standby-scheduler.alloy
+/usr/bin/alloy validate "$config"
 install -d -o root -g alloy -m 0750 /etc/alloy-zfs-disk-standby-scheduler
-install -o root -g alloy -m 0640 zfs-disk-standby-scheduler.alloy /etc/alloy-zfs-disk-standby-scheduler/config.alloy
+install -o root -g alloy -m 0640 "$config" /etc/alloy-zfs-disk-standby-scheduler/config.alloy
 install -m 0644 alloy-zfs-disk-standby-scheduler.service /etc/systemd/system/alloy-zfs-disk-standby-scheduler.service
 systemctl daemon-reload
 systemctl enable --now alloy-zfs-disk-standby-scheduler.service
