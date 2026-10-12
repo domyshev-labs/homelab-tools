@@ -1,146 +1,154 @@
 # Proxmox host configuration backup
 
-Скрипт `pve-config-backup` сохраняет настройки хоста Proxmox VE для восстановления
-после переустановки или поломки системного диска. Это собственный скрипт,
-настроенный 24 сентября 2026 года; версия восстановлена из истории чата с учётом
-удалённого тогда `--xattrs`. Текущее содержимое файлов на сервере не сверялось.
+Собственный скрипт сохраняет конфигурацию хоста Proxmox VE в проверенный ZFS
+dataset. Служба запускает код прямо из checkout `~/homelab-tools`; копировать
+скрипт в `/usr/local/sbin` больше не нужно. После `git pull` следующий запуск
+использует новую версию. Установщик запоминает абсолютный путь checkout.
 
-## Содержимое и поведение
+## Состав и настройки
 
-В архив входят:
+В архив входят `/etc` (включая `/etc/pve`, сеть, systemd, storage, пользователей и
+задания бэкапов), `/var/lib/pve-cluster/config.db`, `/usr/local/sbin`, текущий файл
+скрипта из репозитория и `/root/.ssh`, если существует. Диски VM/CT и данные
+приложений сохраняют отдельные задания Datacenter → Backup.
 
-- весь `/etc`, включая `/etc/pve` (конфиги всех VM/CT, storage, пользователи,
-  задания бэкапов), сеть и systemd units;
-- `/var/lib/pve-cluster/config.db`;
-- `/usr/local/sbin`, включая сам скрипт;
-- `/root/.ssh`, если каталог существует.
-
-Диски VM/CT и данные приложений сюда не входят. Их сохраняют отдельные задания
-Proxmox в Datacenter → Backup.
-
-| Параметр | Значение |
+| Настройка | Значение |
 | --- | --- |
+| Dataset | `tank/backups/proxmox-host-backup` |
 | Каталог | `/tank/backups/proxmox-host-backup` |
-| Имя | `<hostname>-config-YYYY-MM-DD_HH-MM-SS.tar.zst` |
+| Архив | `<hostname>-config-YYYY-MM-DD_HH-MM-SS.tar.zst` |
 | Сжатие | `zstd -T0 -6` |
 | Права | `umask 077`, итоговый архив `0600` |
-| Хранение | Удаление архивов этого хоста с `-mtime +180` после успешного бэкапа |
-| Расписание | Ежедневно 03:30 по часовому поясу сервера, задержка до 10 минут |
-| Пропущенный запуск | `Persistent=true`: выполняется после активации таймера |
+| Хранение | После успеха удаляются архивы этого хоста с `-mtime +180` |
+| Расписание | Каждый день 03:30 по времени сервера, задержка до 10 минут |
+| Пропущенный запуск | `Persistent=false`: не догоняется после включения |
 
-Архив сначала пишется в `.part`, проверяется `zstd -t` и переименовывается.
-При выходе скрипт удаляет незавершённый `.part`. Tar сохраняет ACL и числовые
-UID/GID; `--xattrs` убран из-за отсутствия поддержки в `/etc/pve` (pmxcfs).
-Проверка zstd подтверждает целостность сжатого потока, а не возможность полного
-восстановления хоста. `config.db` копируется как обычный файл работающей базы,
-без SQLite snapshot; это ограничение исходного скрипта.
+`BACKUP_DIR` и `BACKUP_DATASET` можно переопределить через `Environment=` в
+systemd drop-in. Указанный каталог должен совпадать с mountpoint dataset.
+Зависимости: root, Linux, Bash, Python 3, GNU tar, zstd, ZFS, findmnt, flock,
+find, readlink и systemd. Для назначения нужны существующие pool и dataset.
 
-## Установка на Proxmox
+## Защита при отключении tank
 
-Нужны root, Bash, GNU tar, zstd, find и systemd. Для указанного назначения нужен
-существующий ZFS-пул `tank` и родительский dataset `tank/backups`.
-Все команды ниже выполняются на Proxmox, из корня репозитория.
+Скрипт держит общую shared-блокировку
+`/run/lock/zfs-disk-standby-scheduler.lock` на протяжении проверки и бэкапа.
+[Планировщик диска](../../zfs-disk-standby-scheduler/README.md) использует exclusive
+блокировку и ждёт завершения бэкапа перед экспортом. Отдельная блокировка
+`/run/lock/pve-config-backup.lock` запрещает одновременные конфигурационные бэкапы.
+Ручной export без этой блокировки не координируется со скриптом.
 
-Проверь dataset и монтирование:
+Перед записью проверяются наличие каталога, SOURCE/FSTYPE через findmnt,
+`mounted` и `mountpoint` через ZFS. Без нужного ZFS-монтирования скрипт пишет
+ошибку и выходит; не создаёт каталог на системном диске и не импортирует пул.
+Назначение не управляется через `RequiresMountsFor`: доступностью диска управляет
+отдельный планировщик. Расписание бэкапа должно попадать в его окно, например
+02:00–05:00. При выключенном tank бэкап завершается ошибкой без архива.
+
+## Установка и переход с прежнего скрипта
+
+На Proxmox под root, из существующего checkout:
 
 ```bash
-zfs list tank/backups/proxmox-host-backup
-findmnt -T /tank/backups/proxmox-host-backup -o SOURCE,FSTYPE,TARGET
+cd ~/homelab-tools
+git pull --ff-only
+bash proxmox/pve-config-backup/install.sh
+bash observability/agents/enable-pve-config-backup.sh
+systemctl cat pve-config-backup.service pve-config-backup.timer
 ```
 
-Если dataset ещё не существует, при импортированном пуле создай его:
+Установщик проверяет units, сохраняет прежние units и standalone-скрипт в
+`/var/backups/pve-config-backup/before-install-*`, останавливает таймер,
+регистрирует ExecStart из текущего checkout и оставляет таймер остановленным.
+При работающей службе нужно дождаться её завершения. Старый файл в
+`/usr/local/sbin` остаётся для восстановления, но служба его больше не запускает.
+Если нет zstd: `apt-get install -y zstd`.
+
+Сборщик логов должен уже существовать; см. [observability](../../observability/README.md).
+Helper сохраняет endpoint Loki и все прежние источники, проверяет конфиг Alloy,
+делает резервную копию и перезапускает только сборщик. При отсутствии доступа
+к journald helper напечатает команду `usermod -aG adm,systemd-journal alloy`;
+выполни её и повтори установку helper. Архивы сборщику недоступны и не нужны.
+
+Безопасная проверка передачи лога без обращения к tank:
 
 ```bash
-zfs create -o compression=zstd tank/backups/proxmox-host-backup
-chmod 700 /tank/backups/proxmox-host-backup
+printf '%s\n' '{"service":"pve-config-backup","level":"info","event":"collector_test","message":"Configuration backup log collection test"}' | systemd-cat --identifier=pve-config-backup
 ```
 
-Ожидается SOURCE `tank/backups/proxmox-host-backup`, FSTYPE `zfs` и соответствующий
-mountpoint. Не создавай обычный каталог вместо отсутствующего ZFS-монтирования.
-
-При обновлении останови таймер и дождись завершения службы. Перед заменой сохрани
-существующие скрипт и unit-файлы в отдельный каталог с правами `0700`.
+Когда tank импортирован и dataset смонтирован, проверь назначение и бэкап:
 
 ```bash
-systemctl disable --now pve-config-backup.timer
-systemctl is-active pve-config-backup.service
-```
-
-Для первой установки эти две команды не нужны. Копирование файлов:
-
-```bash
-install -m 0700 proxmox/pve-config-backup/pve-config-backup /usr/local/sbin/pve-config-backup
-install -m 0644 proxmox/pve-config-backup/pve-config-backup.service /etc/systemd/system/pve-config-backup.service
-install -m 0644 proxmox/pve-config-backup/pve-config-backup.timer /etc/systemd/system/pve-config-backup.timer
-systemd-analyze verify /etc/systemd/system/pve-config-backup.service /etc/systemd/system/pve-config-backup.timer
-systemctl daemon-reload
-```
-
-При другом назначении измени `BACKUP_DIR` в скрипте и `RequiresMountsFor` в службе
-согласованно. Проверь часовой пояс через `timedatectl`.
-
-## Проверка, расписание и ручной запуск
-
-При смонтированном dataset выполни:
-
-```bash
+systemd-cat --identifier=pve-config-backup /bin/bash "$PWD/proxmox/pve-config-backup/pve-config-backup" --check
 systemctl start pve-config-backup.service
 systemctl status pve-config-backup.service --no-pager
 journalctl -u pve-config-backup.service -n 60 --no-pager
 ls -lht /tank/backups/proxmox-host-backup
 ```
 
-Для одноразовой службы `inactive (dead)` после `status=0/SUCCESS` нормально.
-Проверь конкретный созданный архив, подставив его имя:
-
-```bash
-zstd -t /tank/backups/proxmox-host-backup/ARCHIVE.tar.zst
-tar -I zstd -tf /tank/backups/proxmox-host-backup/ARCHIVE.tar.zst | less
-```
-
-Конфиги VM находятся в `etc/pve/nodes/<node>/qemu-server/<ID>.conf`,
-контейнеров — в `etc/pve/nodes/<node>/lxc/<ID>.conf`.
-После успешной проверки включи расписание:
+`--check` проверяет назначение и блокировки без создания архива; при выключенном
+tank ожидается ошибка `storage_unavailable`. Успешная oneshot-служба показывает
+`inactive (dead)` и `status=0/SUCCESS`. После проверки включи расписание:
 
 ```bash
 systemctl enable --now pve-config-backup.timer
 systemctl list-timers pve-config-backup.timer --all
 ```
 
-Ручной запуск через `systemctl start pve-config-backup.service` пишет лог в journald.
-Прямой запуск `/usr/local/sbin/pve-config-backup` выводит результат в терминал;
-не запускай его одновременно со службой: блокировки в исходном скрипте нет.
+## Обновление и откат
 
-## Совместимость с расписанием диска
+Для изменения кода достаточно `git pull --ff-only` в `~/homelab-tools`.
+Не обновляй checkout во время работающего бэкапа. Если изменились unit-файлы,
+повтори `install.sh`, проверь их и снова включи таймер. При переносе checkout
+тоже нужно повторить установку: systemd хранит абсолютный путь.
 
-Этот скрипт не импортирует ZFS-пул и не управляет standby. Планируй бэкап внутри
-окна доступности диска (например, 02:00–05:00). Исходный скрипт проверяет только
-наличие каталога, не его ZFS-монтирование; `RequiresMountsFor` не заменяет проверку
-пула. При экспортированном пуле каталог может остаться на системном диске.
+Для отката останови таймер и дождись завершения службы. Верни прежнюю версию
+checkout и переустанови units либо восстанови units из конкретного каталога
+`/var/backups/pve-config-backup/before-install-*`. Затем `systemctl daemon-reload`.
+Проверь ExecStart и расписание перед включением: старая служба может указывать
+на standalone-скрипт, а старый таймер иметь `Persistent=true`.
 
-`Persistent=true` может запустить пропущенную задачу вне окна доступности.
-Перед установкой вместе с [ZFS disk standby scheduler](../../zfs-disk-standby-scheduler/README.md)
-согласуй это поведение: используй описанную там общую блокировку и проверку
-монтирования, а при необходимости отключи догоняющие запуски таймера.
-Эта историческая версия не включает такую интеграцию автоматически.
+## Логи и Grafana
 
-## Восстановление и хранение
+Служба пишет stdout/stderr в journald с `SyslogIdentifier=pve-config-backup`.
+Структурированные JSON-события: `backup_started`, `backup_completed`,
+`backup_failed`, `storage_unavailable`, `storage_ready`, `backup_busy`.
+Ошибки внешних команд остаются в журнале, после них идёт JSON с фазой сбоя.
+В Grafana Explore:
 
-Архив содержит секреты хоста; не добавляй его в Git. Копию храни также вне сервера.
-При восстановлении сначала проверь список файлов и распакуй архив в отдельный
-защищённый каталог. Возвращай настройки выборочно после установки совместимого
-Proxmox; не распаковывай весь архив поверх работающего `/`, особенно `/etc/pve`
-и `config.db`. Восстановление работающего pmxcfs требует отдельного плана.
-
-24 сентября 2026 года запуск через systemd был подтверждён `status=0/SUCCESS`.
-На 12 октября в предоставленном списке последний архив датирован 25 сентября:
-текущее состояние таймера и причины отсутствия новых архивов ещё не проверены.
-
-## Локальная проверка
-
-```bash
-bash -n proxmox/pve-config-backup/pve-config-backup
+```logql
+{host="proxmox",service="pve-config-backup"}
 ```
 
-Это проверяет синтаксис. Для проверки фактического бэкапа используй команды
-выше на Proxmox; запуск на рабочем Mac не предназначен для тестирования.
+Только ошибки:
+
+```logql
+{host="proxmox",service="pve-config-backup",level="error"}
+```
+
+Alloy читает только этот journal identifier и отправляет в существующий Loki.
+Прямой запуск Bash пишет в терминал; используй службу или `systemd-cat`, чтобы
+отправить вывод в Grafana. Логи не заменяют оповещение об отсутствии запусков:
+правило alert в Grafana этим пакетом не создаётся.
+
+## Архив и восстановление
+
+Архив сначала пишется в `.part`, проверяется `zstd -t` и переименовывается.
+При ошибке `.part` удаляется. Tar сохраняет ACL и числовые UID/GID; xattrs
+не включены из-за pmxcfs. Проверка zstd подтверждает сжатый поток, а не полное
+восстановление. `config.db` пока копируется как обычный файл работающей базы,
+без транзакционного SQLite snapshot.
+
+Архив содержит секреты: не публикуй его, храни копию вне сервера. Содержимое
+проверяют через `tar -I zstd -tf /path/to/archive.tar.zst`. Восстанавливай настройки
+выборочно по отдельному плану, не распаковывай весь архив поверх работающего `/`.
+
+## Проверка разработки
+
+```bash
+bash -n proxmox/pve-config-backup/pve-config-backup proxmox/pve-config-backup/install.sh observability/agents/enable-pve-config-backup.sh
+python3 -B -m unittest discover -s tests -v
+```
+
+Локальные проверки используют изолированные пути и имитацию Linux-команд;
+не читают конфигурацию хоста и не управляют tank. Проверка Alloy выполняется
+установленным на Proxmox `alloy validate` до изменения рабочего конфига.

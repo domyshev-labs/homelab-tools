@@ -44,8 +44,9 @@ logs, install the Alloy package and follow `observability/README.md`.
 [proxmox/pve-config-backup](proxmox/pve-config-backup/README.md) archives the Proxmox
 host configuration, independently of VM/CT disk backups. Includes the original
 script, systemd service and daily timer, installation and verification instructions.
-The historical version requires a mounted backup dataset; read its disk-scheduling
-limitations before installing alongside the standby scheduler.
+The service executes from the checkout, so `git pull` updates its code. It verifies
+ZFS mounting, coordinates with the disk scheduler and offers JSON journal logs
+for the existing Alloy/Loki collector.
 
 ## Local verification
 

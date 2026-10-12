@@ -2,45 +2,92 @@
 set -Eeuo pipefail
 umask 077
 
-BACKUP_DIR="/tank/backups/proxmox-host-backup"
+BACKUP_DIR="${BACKUP_DIR:-/tank/backups/proxmox-host-backup}"
+BACKUP_DATASET="${BACKUP_DATASET:-tank/backups/proxmox-host-backup}"
+TEMP_ARCHIVE=""
+phase=initialization
+
+log() {
+  python3 - "$1" "$2" "$3" <<'PYLOG'
+import datetime, json, sys
+print(json.dumps(dict(timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    service="pve-config-backup", level=sys.argv[1], event=sys.argv[2],
+    message=sys.argv[3]), ensure_ascii=False), flush=True)
+PYLOG
+}
+cleanup() {
+  [[ -z "$TEMP_ARCHIVE" ]] || rm -f -- "$TEMP_ARCHIVE"
+  return 0
+}
+failed() {
+  local status=$?
+  trap - ERR
+  log error backup_failed "Backup failed during ${phase} (exit ${status})" || true
+  exit "$status"
+}
+trap cleanup EXIT
+trap failed ERR
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --check ) ]]; then
+  log error invalid_arguments 'Usage: pve-config-backup [--check]'
+  exit 2
+fi
+if [[ $EUID -ne 0 ]]; then
+  log error permission_denied 'Run as root on Proxmox'
+  exit 1
+fi
+for tool in python3 flock findmnt zfs tar zstd find; do
+  if ! command -v "$tool" >/dev/null; then
+    log error missing_dependency "Required command unavailable: ${tool}"
+    exit 1
+  fi
+done
+
+# The scheduler uses an exclusive lock: hold a shared lock for the entire backup.
+phase=locking
+exec 9>/run/lock/zfs-disk-standby-scheduler.lock
+flock -s 9
+exec 8>/run/lock/pve-config-backup.lock
+if ! flock -n 8; then
+  log error backup_busy 'Another configuration backup is running'
+  exit 1
+fi
+
+phase=mount_check
+if [[ ! -d "$BACKUP_DIR" ]]; then
+  log error storage_unavailable "Backup directory unavailable: ${BACKUP_DIR}; import and mount the intended ZFS dataset"
+  exit 1
+fi
+source=$(findmnt -n -T "$BACKUP_DIR" -o SOURCE)
+fstype=$(findmnt -n -T "$BACKUP_DIR" -o FSTYPE)
+mountpoint=$(zfs get -H -o value mountpoint "$BACKUP_DATASET")
+mounted=$(zfs get -H -o value mounted "$BACKUP_DATASET")
+if [[ "$fstype" != zfs || "$source" != "$BACKUP_DATASET" || "$mounted" != yes || "$mountpoint" != "$BACKUP_DIR" ]]; then
+  log error storage_unavailable "Expected ${BACKUP_DATASET} mounted at ${BACKUP_DIR}; found source=${source}, type=${fstype}, mountpoint=${mountpoint}, mounted=${mounted}"
+  exit 1
+fi
+if [[ ${1:-} == --check ]]; then
+  log info storage_ready "Backup destination verified: ${BACKUP_DATASET} at ${BACKUP_DIR}; no archive created"
+  exit 0
+fi
+
 HOST_NAME="$(hostname -s)"
 STAMP="$(date +%F_%H-%M-%S)"
 ARCHIVE="${BACKUP_DIR}/${HOST_NAME}-config-${STAMP}.tar.zst"
 TEMP_ARCHIVE="${ARCHIVE}.part"
+log info backup_started "Creating host configuration archive: ${ARCHIVE}"
 
-trap 'rm -f -- "${TEMP_ARCHIVE}"' EXIT
-
-test -d "${BACKUP_DIR}"
-
-ITEMS=(
-  etc
-  var/lib/pve-cluster/config.db
-  usr/local/sbin
-)
-
-if [[ -d /root/.ssh ]]; then
-  ITEMS+=(root/.ssh)
-fi
-
-tar \
-  --acls \
-  --numeric-owner \
-  -I 'zstd -T0 -6' \
-  -cpf "${TEMP_ARCHIVE}" \
-  -C / \
-  "${ITEMS[@]}"
-
-zstd -t "${TEMP_ARCHIVE}"
-mv "${TEMP_ARCHIVE}" "${ARCHIVE}"
-chmod 600 "${ARCHIVE}"
-
-# Хранить архивы 180 дней
-find "${BACKUP_DIR}" \
-  -maxdepth 1 \
-  -type f \
-  -name "${HOST_NAME}-config-*.tar.zst" \
-  -mtime +180 \
-  -delete
-
-trap - EXIT
-echo "Backup created: ${ARCHIVE}"
+ITEMS=(etc var/lib/pve-cluster/config.db usr/local/sbin)
+[[ ! -d /root/.ssh ]] || ITEMS+=(root/.ssh)
+# Preserve the actual source now that it is executed from the checkout.
+SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}")
+ITEMS+=("${SCRIPT_PATH#/}")
+phase=archive_creation
+tar --acls --numeric-owner -I 'zstd -T0 -6' -cpf "$TEMP_ARCHIVE" -C / "${ITEMS[@]}"
+phase=archive_verification
+zstd -t "$TEMP_ARCHIVE"
+mv -- "$TEMP_ARCHIVE" "$ARCHIVE"
+chmod 600 "$ARCHIVE"
+TEMP_ARCHIVE=""
+phase=retention
+find "$BACKUP_DIR" -maxdepth 1 -type f -name "${HOST_NAME}-config-*.tar.zst" -mtime +180 -delete
+log info backup_completed "Backup created and compression verified: ${ARCHIVE}"

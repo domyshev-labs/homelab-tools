@@ -1,6 +1,6 @@
-# Collect zfs-disk-standby-scheduler logs with Grafana Alloy
+# Collect homelab tool logs with Grafana Alloy
 
-This optional collector sends only the disk script logs to an existing Loki server.
+This optional collector sends selected tool logs to an existing Loki server.
 Grafana and Loki are deployed separately; this repository does not deploy them.
 Proxmox backup task logs can be added separately using the opt-in setup below.
 
@@ -171,3 +171,44 @@ at query time without creating a separate indexed stream for every task.
 For failures use `{host="proxmox",service="proxmox-backup",level="error"} | unpack`.
 Start a backup only when its intended storage is mounted and active, then verify
 its progress and final result in Grafana. No synthetic task files are needed.
+
+## Optional: collect Proxmox host configuration backups
+
+After installing the configuration backup service, from `~/homelab-tools` as root:
+
+```bash
+bash observability/agents/enable-pve-config-backup.sh
+systemctl is-active alloy-zfs-disk-standby-scheduler.service
+```
+
+The helper appends `agents/pve-config-backup.alloy` to the installed collector,
+reusing `loki.write.central` and preserving existing disk scheduler and vzdump
+sources and the Loki endpoint. It validates the candidate with installed Alloy,
+saves the previous configuration under
+`/var/backups/alloy-zfs-disk-standby-scheduler/before-config-backup-*`, and restores
+it on restart failure. Repeated installation does not append a second source.
+It requires the `alloy` user to belong to `adm` and `systemd-journal`, as required
+by [Alloy journal source documentation](https://grafana.com/docs/alloy/latest/reference/components/loki/loki.source.journal/).
+If missing, run `usermod -aG adm,systemd-journal alloy` and repeat the helper.
+
+Only `SYSLOG_IDENTIFIER=pve-config-backup` is read. JSON `level` becomes a label;
+raw tar/zstd diagnostic lines remain visible without a level label. Journal
+history starts with up to 24 hours, using the collector's existing state storage.
+No archive is read and no backup or disk operation is started by this helper.
+
+```logql
+{host="proxmox",service="pve-config-backup"}
+{host="proxmox",service="pve-config-backup",level="error"}
+```
+
+For a test independent of backup storage:
+
+```bash
+printf '%s\n' '{"service":"pve-config-backup","level":"info","event":"collector_test","message":"Configuration backup log collection test"}' | systemd-cat --identifier=pve-config-backup
+```
+
+To roll back, copy `config.alloy` from the exact snapshot printed by the helper
+back to `/etc/alloy-zfs-disk-standby-scheduler/config.alloy` and restart
+`alloy-zfs-disk-standby-scheduler.service`. Group memberships are not modified
+by the helper. See [backup instructions](../proxmox/pve-config-backup/README.md)
+for installation, scheduling and storage checks.

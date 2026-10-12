@@ -3,7 +3,7 @@ Description=Daily Proxmox VE host configuration backup
 
 [Timer]
 OnCalendar=*-*-* 03:30:00
-Persistent=true
+Persistent=false
 RandomizedDelaySec=10m
 
 [Install]

@@ -1,0 +1,33 @@
+// Only configuration backup messages; reuse the installed loki.write.central.
+loki.relabel "pve_config_backup" {
+  forward_to = []
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label = "unit"
+  }
+}
+
+loki.source.journal "pve_config_backup" {
+  matches = "SYSLOG_IDENTIFIER=pve-config-backup"
+  max_age = "24h"
+  labels = {
+    host = "proxmox",
+    service = "pve-config-backup",
+  }
+  relabel_rules = loki.relabel.pve_config_backup.rules
+  forward_to = [loki.process.pve_config_backup.receiver]
+}
+
+loki.process "pve_config_backup" {
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+  forward_to = [loki.write.central.receiver]
+}

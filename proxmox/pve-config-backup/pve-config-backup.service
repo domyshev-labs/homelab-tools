@@ -1,7 +1,9 @@
 [Unit]
 Description=Backup Proxmox VE host configuration
-RequiresMountsFor=/tank/backups/proxmox-host-backup
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/pve-config-backup
+ExecStart=/bin/bash /root/homelab-tools/proxmox/pve-config-backup/pve-config-backup
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pve-config-backup
