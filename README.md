@@ -8,6 +8,8 @@ secrets in your own deployment repository. Only generic examples belong here.
   import/export and standby with backup safety checks and rollback.
 - [Proxmox host configuration backup](proxmox/pve-config-backup/README.md): verified
   ZFS destination, scheduler coordination, archive verification and JSON events.
+- [Backup verifier](backup-verifier/README.md): fresh/nonempty archive checks,
+  equal-weight job percentages and color HTML email reports.
 - [Log collection helpers](observability/README.md): install or extend an existing
   Alloy collector using configuration provided by the operator.
 

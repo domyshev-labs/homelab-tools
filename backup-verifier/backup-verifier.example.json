@@ -1,0 +1,28 @@
+{
+  "host": {
+    "config_file": "/etc/pve-config-backup.json",
+    "required_members": [
+      "etc/pve/jobs.cfg",
+      "var/lib/pve-cluster/config.db"
+    ]
+  },
+  "vm": {
+    "job_id": "backup-REPLACE_ID",
+    "dataset": "backup/vms",
+    "directory": "/mnt/backup/vms/dump"
+  },
+  "stability_seconds": 2,
+  "wait_timeout_seconds": 7200,
+  "verification_schedule": "Sun 04:30",
+  "smtp": {
+    "host": "smtp.example.com",
+    "port": 587,
+    "username": "reports@example.com",
+    "from": "reports@example.com",
+    "to": [
+      "operator@example.com"
+    ],
+    "password_file": "/etc/homelab-secrets/smtp-password",
+    "subject_prefix": "Proxmox backup verification"
+  }
+}
