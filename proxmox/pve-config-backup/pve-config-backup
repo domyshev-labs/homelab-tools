@@ -1,0 +1,46 @@
+#!/bin/bash
+set -Eeuo pipefail
+umask 077
+
+BACKUP_DIR="/tank/backups/proxmox-host-backup"
+HOST_NAME="$(hostname -s)"
+STAMP="$(date +%F_%H-%M-%S)"
+ARCHIVE="${BACKUP_DIR}/${HOST_NAME}-config-${STAMP}.tar.zst"
+TEMP_ARCHIVE="${ARCHIVE}.part"
+
+trap 'rm -f -- "${TEMP_ARCHIVE}"' EXIT
+
+test -d "${BACKUP_DIR}"
+
+ITEMS=(
+  etc
+  var/lib/pve-cluster/config.db
+  usr/local/sbin
+)
+
+if [[ -d /root/.ssh ]]; then
+  ITEMS+=(root/.ssh)
+fi
+
+tar \
+  --acls \
+  --numeric-owner \
+  -I 'zstd -T0 -6' \
+  -cpf "${TEMP_ARCHIVE}" \
+  -C / \
+  "${ITEMS[@]}"
+
+zstd -t "${TEMP_ARCHIVE}"
+mv "${TEMP_ARCHIVE}" "${ARCHIVE}"
+chmod 600 "${ARCHIVE}"
+
+# Хранить архивы 180 дней
+find "${BACKUP_DIR}" \
+  -maxdepth 1 \
+  -type f \
+  -name "${HOST_NAME}-config-*.tar.zst" \
+  -mtime +180 \
+  -delete
+
+trap - EXIT
+echo "Backup created: ${ARCHIVE}"

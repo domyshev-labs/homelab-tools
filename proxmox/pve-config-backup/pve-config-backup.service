@@ -1,0 +1,7 @@
+[Unit]
+Description=Backup Proxmox VE host configuration
+RequiresMountsFor=/tank/backups/proxmox-host-backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-config-backup

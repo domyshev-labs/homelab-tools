@@ -39,11 +39,19 @@ zfs-disk-standby-scheduler status
 Read the tool instructions before enabling timers. For optional centralized
 logs, install the Alloy package and follow `observability/README.md`.
 
+## Proxmox host configuration backup
+
+[proxmox/pve-config-backup](proxmox/pve-config-backup/README.md) archives the Proxmox
+host configuration, independently of VM/CT disk backups. Includes the original
+script, systemd service and daily timer, installation and verification instructions.
+The historical version requires a mounted backup dataset; read its disk-scheduling
+limitations before installing alongside the standby scheduler.
+
 ## Local verification
 
 ```bash
 python3 -B -m unittest discover -s tests -v
-bash -n zfs-disk-standby-scheduler/install.sh observability/agents/install.sh
+bash -n zfs-disk-standby-scheduler/install.sh observability/agents/install.sh proxmox/pve-config-backup/pve-config-backup
 ```
 
 Repository: https://github.com/domyshev-labs/homelab-tools
