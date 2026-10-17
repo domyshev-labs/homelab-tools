@@ -1,0 +1,20 @@
+[Unit]
+Description=Reconcile Caddy allowlist with kernel firewall
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -B /opt/caddy-access/access.py worker
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH
+ReadWritePaths=/run
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX

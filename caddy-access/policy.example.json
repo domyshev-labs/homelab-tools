@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "interface": "eth0",
+  "ports": {"tcp": [80, 443], "udp": [443]},
+  "always_allow": ["192.168.50.0/24"],
+  "max_ttl_seconds": 86400,
+  "max_entries": 64
+}

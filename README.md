@@ -4,6 +4,9 @@ Independent Linux/Proxmox tools. Each tool accepts externally supplied configura
 Keep actual hostnames, disk IDs, paths, schedules, log labels, Loki endpoints and
 secrets in your own deployment repository. Only generic examples belong here.
 
+- [Private Caddy access management](caddy-access/README.md): Python API,
+  expiring IP allowlist and independent iptables/ipset worker.
+
 - [ZFS disk standby scheduler](zfs-disk-standby-scheduler/README.md): scheduled
   import/export and standby with backup safety checks and rollback.
 - [Proxmox host configuration backup](proxmox/pve-config-backup/README.md): verified
