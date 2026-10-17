@@ -20,7 +20,7 @@ PY
 getent passwd caddy-access >/dev/null || useradd --system --home-dir /var/lib/caddy-access --shell /usr/sbin/nologin caddy-access
 install -d -m 0755 /opt/caddy-access /etc/caddy-access
 install -d -m 0700 -o caddy-access -g caddy-access /var/lib/caddy-access
-install -m 0644 "$tool_dir/access.py" /opt/caddy-access/access.py
+install -m 0644 "$tool_dir/access.py" "$tool_dir/observe.py" /opt/caddy-access/
 if [[ -e /etc/caddy-access/policy.json ]]; then
     echo "Existing policy preserved. Review it before enabling the worker."
 else

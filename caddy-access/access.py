@@ -72,10 +72,12 @@ def public_address(value):
 def validate_policy(policy):
     if not isinstance(policy["enabled"], bool):
         raise ValueError("enabled must be boolean")
+    if not isinstance(policy.get("observe_attempts", False), bool):
+        raise ValueError("observe_attempts must be boolean")
     interface = policy["interface"]
     if not interface or len(interface) > 15 or not all(c.isalnum() or c in "_.-" for c in interface):
         raise ValueError("invalid interface")
-    if not 60 <= policy["max_ttl_seconds"] <= 604800:
+    if not 60 <= policy["max_ttl_seconds"] <= 2592000:
         raise ValueError("invalid maximum TTL")
     if not 1 <= policy["max_entries"] <= 256:
         raise ValueError("invalid entry limit")
@@ -91,7 +93,7 @@ def validate_policy(policy):
     return policy
 
 
-def validated_entries(document, policy, now):
+def validated_entries(document, policy, now, include_expired=False):
     if document["version"] != 1 or not isinstance(document["revision"], str):
         raise ValueError("invalid document")
     if len(document["revision"]) > 64 or len(document["entries"]) > policy["max_entries"]:
@@ -106,10 +108,12 @@ def validated_entries(document, policy, now):
         expiry = timestamp(entry["expires_at"])
         if expiry > now + dt.timedelta(seconds=policy["max_ttl_seconds"] + 5):
             raise ValueError("expiry exceeds policy")
-        if expiry > now:
-            label = entry.get("label", "")
-            if not isinstance(label, str) or len(label) > 120:
-                raise ValueError("invalid label")
+        label = entry.get("label", "")
+        if not isinstance(label, str) or len(label) > 120:
+            raise ValueError("invalid label")
+        if not isinstance(entry.get("blocked", False), bool):
+            raise ValueError("blocked must be boolean")
+        if (expiry > now and not entry.get("blocked", False)) or (include_expired and expiry > now - dt.timedelta(days=30)):
             active.append(dict(entry, address=address))
     return active
 
@@ -147,6 +151,17 @@ def make_handler(policy, data_dir, status_path, token):
         def do_POST(self):
             self.dispatch("POST")
 
+        def do_PATCH(self):
+            self.dispatch("PATCH")
+
+        def body(self):
+            if self.headers.get("Transfer-Encoding"):
+                raise ValueError("chunked encoding unsupported")
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 1 <= size <= 4096:
+                raise ValueError("invalid body size")
+            return json.loads(self.rfile.read(size))
+
         def do_DELETE(self):
             self.dispatch("DELETE")
 
@@ -160,17 +175,33 @@ def make_handler(policy, data_dir, status_path, token):
                     except FileNotFoundError:
                         status = {"state": "not_applied"}
                     return self.reply(200, status)
-                if method == "GET" and self.path == "/v1/entries":
+                if method == "GET" and self.path in ("/v1/entries", "/v1/entries?include_expired=1"):
                     document = read_json(data_dir / "allowlist.json")
-                    active = validated_entries(document, policy, utcnow())
-                    return self.reply(200, dict(document, entries=active))
+                    entries = validated_entries(document, policy, utcnow(), include_expired="?" in self.path)
+                    return self.reply(200, dict(document, entries=entries))
+                if method == "GET" and self.path == "/v1/attempts":
+                    try:
+                        document = read_json(Path(status_path).parent / "attempts.json")
+                    except FileNotFoundError:
+                        document = {"entries": [], "checked_at": None}
+                    now = utcnow()
+                    document["entries"] = [item for item in document["entries"]
+                        if timestamp(item["last_seen"]) > now - dt.timedelta(days=1)]
+                    return self.reply(200, document)
+                if method == "PATCH" and self.path.startswith("/v1/entries/"):
+                    identifier = self.path[len("/v1/entries/"):]
+                    if not identifier or len(identifier) > 64 or not identifier.isalnum():
+                        raise ValueError("invalid ID")
+                    body = self.body()
+                    if not body or set(body) - {"label", "blocked"}:
+                        raise ValueError("invalid patch")
+                    if "label" in body and (not isinstance(body["label"], str) or len(body["label"]) > 120):
+                        raise ValueError("invalid label")
+                    if "blocked" in body and not isinstance(body["blocked"], bool):
+                        raise ValueError("invalid block state")
+                    return self.mutate(identifier, body, rename=True)
                 if method == "POST" and self.path == "/v1/entries":
-                    if self.headers.get("Transfer-Encoding"):
-                        raise ValueError("chunked encoding unsupported")
-                    size = int(self.headers.get("Content-Length", "0"))
-                    if not 1 <= size <= 4096:
-                        raise ValueError("invalid body size")
-                    body = json.loads(self.rfile.read(size))
+                    body = self.body()
                     address = public_address(body["address"])
                     ttl = body.get("ttl_seconds", 28800)
                     if type(ttl) is not int or not 60 <= ttl <= policy["max_ttl_seconds"]:
@@ -192,20 +223,35 @@ def make_handler(policy, data_dir, status_path, token):
             except OSError:
                 return self.reply(503, {"error": "storage_unavailable"})
 
-        def mutate(self, key, entry):
+        def mutate(self, key, entry, rename=False):
             lockfd = os.open(str(data_dir / "api.lock"), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
             with os.fdopen(lockfd, "w") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
                 now = utcnow()
                 document = read_json(data_dir / "allowlist.json")
-                entries = validated_entries(document, policy, now)
-                if entry is None:
+                entries = validated_entries(document, policy, now, include_expired=True)
+                if rename:
+                    existing = next((item for item in entries if item["id"] == key), None)
+                    if existing is None:
+                        return self.reply(404, {"error": "not_found"})
+                    if "label" in entry:
+                        existing["label"] = entry["label"].strip()
+                    if "blocked" in entry:
+                        existing["blocked"] = entry["blocked"]
+                    entry = existing
+                elif entry is None:
                     if not any(item["id"] == key for item in entries):
                         return self.reply(404, {"error": "not_found"})
                     entries = [item for item in entries if item["id"] != key]
                 else:
                     entries = [item for item in entries if item["address"] != key]
                     entries.append(entry)
+                    # Evict oldest expired history first; active grants are never evicted.
+                    while len(entries) > policy["max_entries"]:
+                        expired = [item for item in entries if timestamp(item["expires_at"]) <= now]
+                        if not expired:
+                            raise ValueError("entry limit exceeded")
+                        entries.remove(min(expired, key=lambda item: timestamp(item["expires_at"])))
                 document = {"version": 1, "revision": revision(), "entries": entries}
                 validated_entries(document, policy, now)
                 atomic_json(data_dir / "allowlist.json", document)
@@ -243,6 +289,16 @@ class Firewall:
         # Populate terminal DROP first: a crash during setup must not open access.
         self.ensure_rule(binary, CHAIN, ["-j", "DROP"])
         self.ensure_rule(binary, CHAIN, ["-m", "set", "--match-set", name, "src", "-j", "RETURN"])
+        if policy.get("observe_attempts", False):
+            # Only denied TCP SYN / UDP packets are copied; NFLOG never changes verdicts.
+            for protocol in ("tcp", "udp"):
+                rule = ["-m", "set", "!", "--match-set", name, "src", "-p", protocol]
+                if protocol == "tcp":
+                    rule += ["--syn"]
+                rule += ["-m", "limit", "--limit", "10/second", "--limit-burst", "20",
+                         "-j", "NFLOG", "--nflog-group", "100", "--nflog-size", "96",
+                         "--nflog-threshold", "1", "--nflog-prefix", "caddy-denied"]
+                self.ensure_rule(binary, CHAIN, rule)
         chains = ["INPUT"]  # Also covers Docker's IPv6 userland proxy.
         if self.run(binary, "-w", "5", "-S", "DOCKER-USER", check=False).returncode:
             # Docker preserves this user-owned chain. Preparing it before the
@@ -273,7 +329,7 @@ def reconcile(policy, document, firewall, now=None):
             if address.version == version:
                 network = str(ipaddress.ip_network(str(address)))
                 if network not in members:
-                    members[network] = math.ceil((timestamp(entry["expires_at"]) - now).total_seconds())
+                    members[network] = min(2147483, math.ceil((timestamp(entry["expires_at"]) - now).total_seconds()))
         name = "caddy_allow" + str(version)
         firewall.apply_set(name, family, sorted(members.items()))
         firewall.attach(binary, name, policy)

@@ -133,3 +133,36 @@ This creates a temporary network namespace, checks both rule families, set
 matching, revocation and kernel expiry while the worker is stopped. It does not
 test real internet packet traversal, service units or production boot ordering;
 the deployment acceptance checks above are still required.
+
+## Lease management and connection attempts
+
+The root policy accepts `max_ttl_seconds` up to 2592000 (30 days). Each kernel
+ipset TTL is capped at 2147483 seconds and refreshed by the existing worker;
+if the worker stops, a 30-day grant may therefore close early, never late.
+`GET /v1/entries?include_expired=1` includes expired records from the last
+30 days and manually blocked entries. The bounded list keeps at most
+`max_entries` records; oldest expired records are evicted before active ones.
+`PATCH /v1/entries/ID` accepts `label` and/or boolean `blocked`, preserves the
+original expiry and returns a queued revision. Unblocking an expired entry
+does not renew it. POST to the same address renews from now and clears blocking.
+DELETE removes active, blocked or retained expired records.
+
+Enable optional `observe_attempts: true` only after installing tcpdump and
+starting `caddy-access-observer.service`. Managed NFLOG rules copy metadata
+from denied TCP SYN and UDP packets in CADDY_ACCESS to group 100; logging has
+no ACCEPT verdict and never alters the terminal DROP. Trusted/allowed sources
+are excluded. Each family/protocol is sampled at at most 10 packets/second,
+burst 20; this is not a complete connection/security audit. The dedicated
+observer parses tcpdump's text headers without payload output or packet files.
+It keeps at most 256 public IPs for 24 hours in `/run/caddy-access/attempts.json`
+(root-owned 0644); reboot/restart clears observations. Up to 4096 flow keys
+suppress retransmissions for 60 seconds. Payload, tokens, URLs and headers
+are never persisted. Counts are approximate sampled flow observations.
+`GET /v1/attempts` requires the normal Bearer token and returns `checked_at`
+so clients can reject stale collector data. No observation grants access.
+
+Rollback: stop/disable observer, set observe_attempts false, remove only the
+managed NFLOG rules from CADDY_ACCESS in both families (preserve RETURN/DROP
+and managed jumps). Before restoring an older 24-hour API/worker, shorten or
+remove any active grants beyond that older policy limit. Never flush the
+shared Docker firewall. Upgrades must preserve api.env and allowlist.json.
