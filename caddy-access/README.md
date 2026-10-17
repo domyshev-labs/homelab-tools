@@ -5,6 +5,15 @@ Python 3.9+ standard-library API and separate root worker. API listens on
 the management endpoint. A Bearer token is also required on every endpoint.
 No Tailscale Funnel, public Caddy route, Docker socket or root HTTP server.
 
+For an existing Tailscale subnet router, the deployment may override API ExecStart
+with `api --bind <LAN-IP>` and restrict service networking using systemd
+IPAddressDeny/Allow (verify kernel support and denied-source tests). Allow only the
+router's LAN address, the locally required test source, and tailnet source ranges
+if the router preserves them. Never bind to a public interface without this
+restriction. This mode uses HTTP on the router-to-LAN hop; Tailscale encrypts the
+client-to-router leg. Use Serve on a local node or a separately configured HTTPS
+gateway when TLS across the LAN is required.
+
 ## State and API
 
 Root-owned `/etc/caddy-access/policy.json` defines interface, protected original

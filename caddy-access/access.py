@@ -286,6 +286,8 @@ def main():
     parser.add_argument("--data-dir", default="/var/lib/caddy-access")
     parser.add_argument("--status", default="/run/caddy-access/status.json")
     parser.add_argument("--port", type=int, default=9120)
+    parser.add_argument("--bind", type=ipaddress.IPv4Address, default=ipaddress.IPv4Address("127.0.0.1"),
+                        help="API IPv4 bind address; non-loopback requires a separately restricted private network path")
     args = parser.parse_args()
     policy = validate_policy(read_json(args.policy))
     if args.mode == "api":
@@ -297,7 +299,7 @@ def main():
                 sock, address = super().get_request()
                 sock.settimeout(10)
                 return sock, address
-        Server(("127.0.0.1", args.port), make_handler(policy, args.data_dir, args.status, token)).serve_forever()
+        Server((str(args.bind), args.port), make_handler(policy, args.data_dir, args.status, token)).serve_forever()
     else:
         # Root-owned directory, never writable by the API service.
         status_dir = Path(args.status).parent
