@@ -4,6 +4,9 @@ After=docker.service
 
 [Service]
 Type=oneshot
+RuntimeDirectory=caddy-access
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 ExecStart=/usr/bin/python3 -B /opt/caddy-access/access.py worker
 TimeoutStartSec=120
 UMask=0077
