@@ -26,7 +26,10 @@ reader=subprocess.Popen(['tcpdump','-l','-nn','-q','-t','-i','nflog:100','-s','9
 time.sleep(0.7)
 with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sender:
     sender.bind(('8.8.8.8',0))
-    sender.sendto(b'payload-must-not-be-recorded',('1.1.1.1',443))
+    try:
+        sender.sendto(b'payload-must-not-be-recorded',('1.1.1.1',443))
+    except PermissionError:
+        pass  # Expected: namespace OUTPUT rule drops the packet after NFLOG.
 try:
     out,err=reader.communicate(timeout=5)
 except BaseException:
