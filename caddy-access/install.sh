@@ -37,6 +37,6 @@ with os.fdopen(fd, 'w') as stream:
     stream.write('CADDY_ACCESS_TOKEN=' + secrets.token_urlsafe(48) + '\n')
 PY
 fi
-install -m 0644 "$tool_dir"/systemd/* /etc/systemd/system/
+install -m 0644 "$tool_dir"/systemd/*.service "$tool_dir"/systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
 echo 'Installed without starting services or changing firewall. Follow README activation procedure.'

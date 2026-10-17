@@ -49,7 +49,9 @@ retain service authentication.
 
 ## Firewall scope
 
-Requires Docker's **iptables backend** and the IPv4 DOCKER-USER chain.
+Requires Docker's **iptables backend**. The worker prepares DOCKER-USER in both
+families if absent, so it can run before Docker starts; Docker later connects
+that chain to its forwarding rules.
 The `iptables` CLI may itself use the iptables-nft compatibility layer; this
 differs from Docker's native nftables backend, which this tool does not support.
 Install ipset/iptables packages first. Worker does not disable or replace Docker
@@ -106,13 +108,17 @@ every unrelated rule. Delete jumps before sets. Verify against saved rules.
 
 ## Availability limits
 
-This VM-local worker is not an always-on external firewall. After a host reboot
-or Docker rewriting chains there can be an exposure window until the worker
-reattaches its rules; the timer repairs drift after Docker restarts. Kernel
-timeouts prevent stale temporary grants, but the worker's state is not durable
-kernel firewall persistence. If filtering must hold from the first packet after
-boot, enforce it on the router or Proxmox outside this guest, or add a separately
-verified boot/Docker startup interlock before enabling internet forwarding.
+For filtering before container autostart, install the provided
+`systemd/docker-caddy-access.conf.example` as
+`/etc/systemd/system/docker.service.d/caddy-access.conf`, then daemon-reload.
+This executes the worker before each Docker daemon start, including boot. Docker
+preserves the user-owned DOCKER-USER chain. Failure blocks Docker startup, so this
+interlock affects all containers: keep the configuration valid and retain console
+access. Deployment must verify the worker before adding this drop-in; the generic
+installer does not enable it automatically. Removing the installed worker requires
+removing the drop-in first. Without the drop-in there is an exposure window until
+the timer reconciles. Unexpected global firewall flushes are repaired only by
+the timer; an external firewall provides an independent enforcement boundary.
 
 Unit tests exercise validation, authenticated API/storage behavior, timeouts
 and command construction with a fake firewall. To check real kernel commands

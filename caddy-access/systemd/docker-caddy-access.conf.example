@@ -1,0 +1,5 @@
+[Service]
+# Install as docker.service.d/caddy-access.conf only after the worker has been
+# installed and tested. Run before every daemon start, including container
+# autostart after boot. A worker failure prevents Docker startup (fail closed).
+ExecStartPre=/usr/bin/python3 -B /opt/caddy-access/access.py worker

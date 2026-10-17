@@ -111,6 +111,17 @@ class AccessTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 access.read_json(link)
 
+    def test_prepares_docker_user_before_daemon_start(self):
+        firewall = access.Firewall()
+        calls = []
+        def run(*args, **kwargs):
+            calls.append(args)
+            return Mock(returncode=1 if "-C" in args or "-S" in args else 0)
+        firewall.run = run
+        firewall.attach("iptables", "caddy_allow4", self.policy)
+        self.assertIn(("iptables", "-w", "5", "-N", "DOCKER-USER"), calls)
+        self.assertTrue(any("-I" in call and "DOCKER-USER" in call for call in calls))
+
     def test_authenticated_api_queue_replace_and_revoke(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

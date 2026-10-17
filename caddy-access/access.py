@@ -244,10 +244,11 @@ class Firewall:
         self.ensure_rule(binary, CHAIN, ["-j", "DROP"])
         self.ensure_rule(binary, CHAIN, ["-m", "set", "--match-set", name, "src", "-j", "RETURN"])
         chains = ["INPUT"]  # Also covers Docker's IPv6 userland proxy.
-        if self.run(binary, "-w", "5", "-S", "DOCKER-USER", check=False).returncode == 0:
-            chains.append("DOCKER-USER")
-        elif binary == "iptables":
-            raise RuntimeError("Docker iptables DOCKER-USER chain is required")
+        if self.run(binary, "-w", "5", "-S", "DOCKER-USER", check=False).returncode:
+            # Docker preserves this user-owned chain. Preparing it before the
+            # daemon starts closes the container-autostart exposure window.
+            self.run(binary, "-w", "5", "-N", "DOCKER-USER")
+        chains.append("DOCKER-USER")
         for chain in chains:
             for protocol, ports in policy["ports"].items():
                 for port in ports:
@@ -304,6 +305,7 @@ def main():
         # Root-owned directory, never writable by the API service.
         status_dir = Path(args.status).parent
         status_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+        status_dir.chmod(0o755)
         with (status_dir / "worker.lock").open("w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             try:
