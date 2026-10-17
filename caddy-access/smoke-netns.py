@@ -8,8 +8,8 @@ spec = importlib.util.spec_from_file_location('access', sys.argv[1])
 a = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(a)
 run = lambda *args, **kw: subprocess.run(args, capture_output=True, text=True, **kw)
-run('iptables', '-N', 'DOCKER-USER', check=True)
-run('ip6tables', '-N', 'DOCKER-USER', check=True)
+assert run('iptables', '-S', 'DOCKER-USER').returncode != 0
+assert run('ip6tables', '-S', 'DOCKER-USER').returncode != 0
 p = {'enabled': True, 'interface': 'eth0', 'ports': {'tcp':[80,443], 'udp':[443]},
      'always_allow':['192.168.50.0/24'], 'max_ttl_seconds':86400, 'max_entries':64}
 def document(seconds):
