@@ -4,8 +4,9 @@ Independent Linux/Proxmox tools. Each tool accepts externally supplied configura
 Keep actual hostnames, disk IDs, paths, schedules, log labels, Loki endpoints and
 secrets in your own deployment repository. Only generic examples belong here.
 
-- [Private Caddy access management](caddy-access/README.md): Python API,
-  expiring IP allowlist and independent iptables/ipset worker.
+Akita Guard has moved to [its own repository](https://github.com/domyshev-labs/akita-guard),
+including the iPhone app and the [Python backend](https://github.com/domyshev-labs/akita-guard/tree/main/backend).
+See the [migration note](caddy-access/README.md) for existing installations.
 
 - [ZFS disk standby scheduler](zfs-disk-standby-scheduler/README.md): scheduled
   import/export and standby with backup safety checks and rollback.
